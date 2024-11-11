@@ -1,7 +1,7 @@
 apiVersion: argoproj.io/v1alpha1
 kind: Workflow
 metadata:
-  name: iperf3-network-test-2
+  name: iperf3-network-test
   namespace: argocd
 spec:
   entrypoint: network-test-suite
@@ -14,6 +14,10 @@ spec:
   templates:
     - name: network-test-suite
       steps:
+        - - name: get-server-nodes # Added this step first
+            template: get-server-nodes
+        - - name: get-client-nodes # Added this step
+            template: get-client-nodes
         - - name: create-server-service
             template: iperf3-service
         - - name: deploy-servers
