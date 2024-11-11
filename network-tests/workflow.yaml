@@ -1,7 +1,7 @@
 apiVersion: argoproj.io/v1alpha1
 kind: Workflow
 metadata:
-  name: iperf3-network-test-20
+  name: iperf3-network-test-6
   namespace: argocd
   labels:
     workflow: iperf3-test
@@ -25,8 +25,10 @@ spec:
   templates:
     - name: network-test-suite
       steps:
-        - - name: cleanup-previous
-            template: cleanup-previous
+        # - - name: cleanup-stuck-workflows
+        #     template: cleanup-stuck-workflows
+        # - - name: cleanup-previous
+        #     template: cleanup-previous
         - - name: get-server-nodes
             template: get-server-nodes
         - - name: get-client-nodes
@@ -56,6 +58,23 @@ spec:
         - - name: final-cleanup
             template: cleanup-all
 
+    - name: cleanup-stuck-workflows
+      script:
+        image: bitnami/kubectl
+        command: [bash]
+        source: |
+          set -ex
+          echo "Cleaning up stuck workflows..."
+          kubectl get workflows -n argocd --selector=workflow=iperf3-test | \
+            grep -v "Succeeded\|Failed" | \
+            awk '{print $1}' | \
+            while read wf; do
+              echo "Force deleting workflow $wf"
+              kubectl delete workflow $wf -n argocd --force --grace-period=0 || true
+            done
+          echo "Cleanup of stuck workflows completed"
+      activeDeadlineSeconds: 30
+
     - name: cleanup-previous
       script:
         image: bitnami/kubectl
@@ -63,7 +82,42 @@ spec:
         source: |
           set -ex
           echo "Starting cleanup process..."
-          kubectl delete pods -n argocd $(kubectl get pods -n argocd | grep ^iperf3- | awk '{print $1}') --force --grace-period=0
+
+          # Function to force delete pods with a specific label
+          force_delete_pods() {
+            local label=$1
+            echo "Deleting pods with label: $label"
+            kubectl get pods -n argocd -l $label -o name | while read pod; do
+              echo "Force deleting $pod"
+              kubectl delete $pod -n argocd --force --grace-period=0 --wait=false || true
+              if kubectl get $pod -n argocd >/dev/null 2>&1; then
+                echo "Removing finalizers from $pod"
+                kubectl patch $pod -n argocd -p '{"metadata":{"finalizers":null}}' --type=merge || true
+                kubectl delete $pod -n argocd --force --grace-period=0 --wait=false || true
+              fi
+            done
+          }
+
+          # Delete old workflows
+          echo "Deleting old workflows..."
+          kubectl delete workflow --selector=workflow=iperf3-test -n argocd --ignore-not-found || true
+
+          # Force delete pods with specific labels
+          force_delete_pods "app=iperf3-server"
+          force_delete_pods "test-type=iperf3-client"
+
+          # Short wait
+          echo "Waiting 5 seconds for delete operations to propagate..."
+          sleep 5
+
+          # Final verification
+          REMAINING_PODS=$(kubectl get pods -n argocd | grep ^iperf3- | wc -l)
+          if [ "$REMAINING_PODS" -gt 0 ]; then
+            echo "Warning: $REMAINING_PODS iperf3 pods still remain, but continuing anyway"
+          else
+            echo "All iperf3 pods successfully removed"
+          fi
+          exit 0
       activeDeadlineSeconds: 60
 
     - name: get-server-nodes
