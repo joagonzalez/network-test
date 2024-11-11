@@ -16,7 +16,7 @@ spec:
       - name: client-label
         value: role=red
       - name: test-duration
-        value: "150"
+        value: "60"
       - name: cleanup-wait
         value: "10"
       - name: server-startup-wait
@@ -45,6 +45,20 @@ spec:
                   value: "10M"
                 - name: test-name
                   value: "low-bandwidth"
+                - name: client-nodes
+                  value: "{{steps.get-client-nodes.outputs.result}}"
+                - name: server-nodes
+                  value: "{{steps.get-server-nodes.outputs.result}}"
+                - name: test-duration
+                  value: "{{workflow.parameters.test-duration}}"
+        - - name: test-20mbps
+            template: iperf3-client-step
+            arguments:
+              parameters:
+                - name: bandwidth
+                  value: "20M"
+                - name: test-name
+                  value: "medium-bandwidth"
                 - name: client-nodes
                   value: "{{steps.get-client-nodes.outputs.result}}"
                 - name: server-nodes
