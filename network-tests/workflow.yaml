@@ -1,7 +1,7 @@
 apiVersion: argoproj.io/v1alpha1
 kind: Workflow
 metadata:
-  name: iperf3-network-test-23
+  name: iperf3-network-test-24
   namespace: argocd
   labels:
     workflow: iperf3-test
@@ -25,8 +25,8 @@ spec:
   templates:
     - name: network-test-suite
       steps:
-        - - name: cleanup-previous
-            template: cleanup-previous
+        # - - name: cleanup-previous
+        #     template: cleanup-previous
         - - name: get-server-nodes
             template: get-server-nodes
         - - name: get-client-nodes
