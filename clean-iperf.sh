@@ -14,7 +14,7 @@ done
 
 # Final force delete
 echo "Final cleanup..."
-kubectl delete pods -n argocd 'iperf3-*' --force --grace-period=0
+kubectl delete pods -n argocd $(kubectl get pods -n argocd | grep ^iperf3- | awk '{print $1}') --force --grace-period=0
 
 # Verify
 echo "Verifying cleanup..."
