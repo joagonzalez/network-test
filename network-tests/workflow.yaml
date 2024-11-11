@@ -5,13 +5,20 @@ metadata:
   namespace: argocd
 spec:
   entrypoint: network-test-suite
+  arguments:
+    parameters:
+      - name: server-label
+        value: role=blue
+      - name: client-label
+        value: role=red
   templates:
     - name: network-test-suite
       steps:
         - - name: create-server-service
             template: iperf3-service
-        - - name: deploy-server
+        - - name: deploy-servers
             template: iperf3-server
+            withParam: "{{steps.get-server-nodes.outputs.result}}"
         - - name: test-10mbps
             template: iperf3-client
             arguments:
@@ -20,6 +27,7 @@ spec:
                   value: "10M"
                 - name: test-name
                   value: "low-bandwidth"
+            withParam: "{{steps.get-client-nodes.outputs.result}}"
         - - name: test-100mbps
             template: iperf3-client
             arguments:
@@ -28,16 +36,23 @@ spec:
                   value: "100M"
                 - name: test-name
                   value: "medium-bandwidth"
-        - - name: test-1gbps
-            template: iperf3-client
-            arguments:
-              parameters:
-                - name: bandwidth
-                  value: "1G"
-                - name: test-name
-                  value: "high-bandwidth"
+            withParam: "{{steps.get-client-nodes.outputs.result}}"
         - - name: cleanup
             template: cleanup
+
+    - name: get-server-nodes
+      script:
+        image: bitnami/kubectl
+        command: [bash]
+        source: |
+          kubectl get nodes -l {{workflow.parameters.server-label}} -o jsonpath='{.items[*].metadata.name}' | tr ' ' '\n' | jq -R . | jq -s .
+
+    - name: get-client-nodes
+      script:
+        image: bitnami/kubectl
+        command: [bash]
+        source: |
+          kubectl get nodes -l {{workflow.parameters.client-label}} -o jsonpath='{.items[*].metadata.name}' | tr ' ' '\n' | jq -R . | jq -s .
 
     - name: iperf3-service
       resource:
@@ -57,19 +72,22 @@ spec:
                 targetPort: 5201
 
     - name: iperf3-server
+      inputs:
+        parameters:
+          - name: node
       resource:
         action: create
         manifest: |
           apiVersion: v1
           kind: Pod
           metadata:
-            name: iperf3-server
+            name: iperf3-server-{{inputs.parameters.node}}
             namespace: argocd
             labels:
               app: iperf3-server
           spec:
             nodeSelector:
-              kubernetes.io/hostname: microk8s-01  # Replace with your first node name
+              kubernetes.io/hostname: "{{inputs.parameters.node}}"
             containers:
             - name: server
               image: networkstatic/iperf3
@@ -83,17 +101,18 @@ spec:
         parameters:
           - name: bandwidth
           - name: test-name
+          - name: node
       resource:
         action: create
         manifest: |
           apiVersion: v1
           kind: Pod
           metadata:
-            name: iperf3-client-{{inputs.parameters.test-name}}
+            name: iperf3-client-{{inputs.parameters.test-name}}-{{inputs.parameters.node}}
             namespace: argocd
           spec:
             nodeSelector:
-              kubernetes.io/hostname: microk8s-02  # Replace with your second node name
+              kubernetes.io/hostname: "{{inputs.parameters.node}}"
             containers:
             - name: client
               image: networkstatic/iperf3
@@ -103,9 +122,9 @@ spec:
                 - |
                   RESULT=$(iperf3 -c iperf3-server.argocd.svc.cluster.local -b {{inputs.parameters.bandwidth}} -t 30 -J)
                   BANDWIDTH=$(echo $RESULT | jq -r '.end.sum_received.bits_per_second')
-                  curl --data-binary @- http://prometheus-pushgateway.monitoring.svc.cluster.local:9091/metrics/job/iperf3_test/test_name/{{inputs.parameters.test-name}} <<EOF
+                  curl --data-binary @- http://prometheus-pushgateway.monitoring.svc.cluster.local:9091/metrics/job/iperf3_test/test_name/{{inputs.parameters.test-name}}/client_node/{{inputs.parameters.node}} <<EOF
                   # TYPE iperf3_bandwidth_bits_per_second gauge
-                  iperf3_bandwidth_bits_per_second{test_name="{{inputs.parameters.test-name}}"} $BANDWIDTH
+                  iperf3_bandwidth_bits_per_second{test_name="{{inputs.parameters.test-name}}",client_node="{{inputs.parameters.node}}"} $BANDWIDTH
                   EOF
             restartPolicy: Never
 

@@ -100,9 +100,9 @@ data:
                 "uid": "prometheus"
               },
               "expr": "iperf3_bandwidth_bits_per_second",
-              "legendFormat": "{{test_name}}",
-              "refId": "A"
-            }
+                "legendFormat": "{{test_name}} from {{client_node}}",
+                "refId": "A"
+              }
           ],
           "title": "Network Bandwidth Tests",
           "type": "timeseries"
