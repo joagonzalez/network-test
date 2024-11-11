@@ -4,8 +4,7 @@ metadata:
   name: iperf3-network-test
   namespace: argocd
 spec:
-  # Overall workflow timeout
-  activeDeadlineSeconds: 800 # total workflow timeout in seconds
+  activeDeadlineSeconds: 1500 # total workflow timeout in seconds
 
   entrypoint: network-test-suite
   arguments:
@@ -23,29 +22,24 @@ spec:
 
   templates:
     - name: network-test-suite
+      activeDeadlineSeconds: 3000 # 50 minutes timeout for the main template
       steps:
         - - name: cleanup-previous
             template: cleanup-previous
-            timeout: "30s" # Timeout for cleanup step
         - - name: get-server-nodes
             template: get-server-nodes
-            timeout: "30s"
         - - name: get-client-nodes
             template: get-client-nodes
-            timeout: "30s"
         - - name: create-server-service
             template: iperf3-service
-            timeout: "30s"
         - - name: deploy-servers
             template: iperf3-server-step
             arguments:
               parameters:
                 - name: server-nodes
                   value: "{{steps.get-server-nodes.outputs.result}}"
-            timeout: "5m" # 5 minutes timeout for server deployment
         - - name: wait-for-servers
             template: wait-for-servers
-            timeout: "2m"
         - - name: test-10mbps
             template: iperf3-client-step
             arguments:
@@ -58,13 +52,11 @@ spec:
                   value: "{{steps.get-client-nodes.outputs.result}}"
                 - name: test-duration
                   value: "{{workflow.parameters.test-duration}}"
-            timeout: "10m" # 10 minutes timeout for test execution
         - - name: final-cleanup
             template: cleanup-all
-            timeout: "30s"
 
-    # New template to wait for servers to be ready
     - name: wait-for-servers
+      activeDeadlineSeconds: 120 # 2 minutes timeout
       script:
         image: bitnami/kubectl
         command: [bash]
@@ -74,6 +66,7 @@ spec:
           kubectl wait --for=condition=ready pod -l app=iperf3-server -n argocd --timeout=60s
 
     - name: cleanup-previous
+      activeDeadlineSeconds: 30 # 30 seconds timeout
       script:
         image: bitnami/kubectl
         command: [bash]
@@ -84,7 +77,31 @@ spec:
           echo "Waiting {{workflow.parameters.cleanup-wait}} seconds for cleanup..."
           sleep {{workflow.parameters.cleanup-wait}}
 
+    - name: iperf3-client-step
+      activeDeadlineSeconds: 600 # 10 minutes timeout
+      inputs:
+        parameters:
+          - name: bandwidth
+          - name: test-name
+          - name: client-nodes
+          - name: test-duration
+      steps:
+        - - name: run-client
+            template: iperf3-client
+            arguments:
+              parameters:
+                - name: bandwidth
+                  value: "{{inputs.parameters.bandwidth}}"
+                - name: test-name
+                  value: "{{inputs.parameters.test-name}}"
+                - name: test-duration
+                  value: "{{inputs.parameters.test-duration}}"
+                - name: node
+                  value: "{{item}}"
+            withParam: "{{inputs.parameters.client-nodes}}"
+
     - name: iperf3-client
+      activeDeadlineSeconds: 300 # 5 minutes timeout
       inputs:
         parameters:
           - name: bandwidth
