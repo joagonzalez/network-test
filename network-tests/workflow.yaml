@@ -1,7 +1,7 @@
 apiVersion: argoproj.io/v1alpha1
 kind: Workflow
 metadata:
-  name: iperf3-network-test-7
+  name: iperf3-network-test-8
   namespace: argocd
   labels:
     workflow: iperf3-test
@@ -20,7 +20,7 @@ spec:
       - name: cleanup-wait
         value: "10"
       - name: server-startup-wait
-        value: "10"
+        value: "5"
 
   templates:
     - name: network-test-suite
@@ -140,7 +140,7 @@ spec:
           - name: server-nodes
           - name: test-duration
       script:
-        image: nicolaka/netshoot
+        image: bitnami/kubectl
         command: [bash]
         source: |
           set -ex
@@ -168,27 +168,20 @@ spec:
             labels:
               test-type: iperf3-client
               workflow: iperf3-test
-            annotations:
-              sidecar.istio.io/inject: "false"  # Prevent Istio injection if using it
           spec:
             nodeSelector:
               kubernetes.io/hostname: "$CLIENT"
-            priorityClassName: system-cluster-critical  # Add priority
             containers:
             - name: client
-              image: nicolaka/netshoot
+              image: nicolaka/netshoot    # This pod will use netshoot for iperf3
               command:
                 - /bin/bash
                 - -c
                 - |
                   set -ex
 
-                  # Trap signals
-                  trap 'echo "Caught signal, cleaning up..."; exit 0' TERM INT
-
                   SERVER_POD="iperf3-server-${SERVER}"
 
-                  # Wait for DNS resolution
                   echo "Waiting for DNS resolution..."
                   for i in \$(seq 1 30); do
                     if SERVER_IP=\$(getent hosts \${SERVER_POD}.argocd.svc.cluster.local | awk '{ print \$1 }'); then
@@ -204,30 +197,9 @@ spec:
                     exit 1
                   fi
 
-                  # Check server connectivity
-                  echo "Checking server connectivity..."
-                  for i in \$(seq 1 30); do
-                    if nc -z -v -w5 \$SERVER_IP 5201; then
-                      echo "Server is reachable"
-                      break
-                    fi
-                    if [ \$i -eq 30 ]; then
-                      echo "Server not reachable after 30 attempts"
-                      exit 1
-                    fi
-                    echo "Attempt \$i: Waiting for server..."
-                    sleep 2
-                  done
-
-                  # Run iperf3 test with timeout
                   echo "Starting iperf3 test..."
-                  if ! timeout {{inputs.parameters.test-duration}}s iperf3 -c \$SERVER_IP -b {{inputs.parameters.bandwidth}} -t {{inputs.parameters.test-duration}} -J > /tmp/result.json; then
-                    echo "iperf3 test failed"
-                    exit 1
-                  fi
+                  RESULT=\$(iperf3 -c \$SERVER_IP -b {{inputs.parameters.bandwidth}} -t {{inputs.parameters.test-duration}} -J)
 
-                  # Process results
-                  RESULT=\$(cat /tmp/result.json)
                   BANDWIDTH=\$(echo "\$RESULT" | jq -r '.end.sum_received.bits_per_second')
 
                   if [ -z "\$BANDWIDTH" ] || [ "\$BANDWIDTH" = "null" ]; then
@@ -235,24 +207,11 @@ spec:
                     exit 1
                   fi
 
-                  # Push metrics with detailed error handling
                   METRICS="# TYPE iperf3_bandwidth_bits_per_second gauge
                   iperf3_bandwidth_bits_per_second{test_name=\\\"{{inputs.parameters.test-name}}\\\",client_node=\\\"${CLIENT}\\\",server_node=\\\"${SERVER}\\\"} \$BANDWIDTH"
 
-                  for i in \$(seq 1 5); do
-                    echo "Attempt \$i: Pushing metrics..."
-                    if curl -v --max-time 30 --retry 3 --retry-delay 5 \
-                      --data-binary "\$METRICS" \
-                      http://prometheus-pushgateway.monitoring.svc.cluster.local:9091/metrics/job/iperf3_test; then
-                      echo "Metrics pushed successfully"
-                      break
-                    fi
-                    sleep 5
-                    if [ \$i -eq 5 ]; then
-                      echo "Failed to push metrics after 5 attempts"
-                      exit 1
-                    fi
-                  done
+                  echo "\$METRICS" | curl -v --max-time 30 --retry 3 --retry-delay 5 \
+                    --data-binary @- http://prometheus-pushgateway.monitoring.svc.cluster.local:9091/metrics/job/iperf3_test
 
                   echo "Test completed successfully"
               resources:
@@ -262,32 +221,12 @@ spec:
                 limits:
                   memory: "512Mi"
                   cpu: "1000m"
-              securityContext:
-                capabilities:
-                  add: ["NET_ADMIN"]
-                runAsNonRoot: false
-                runAsUser: 0
-              readinessProbe:
-                exec:
-                  command: ["/bin/sh", "-c", "pgrep iperf3 || true"]
-                initialDelaySeconds: 5
-                periodSeconds: 10
-                timeoutSeconds: 5
-                failureThreshold: 3
-              livenessProbe:
-                exec:
-                  command: ["/bin/sh", "-c", "pgrep iperf3 || true"]
-                initialDelaySeconds: 5
-                periodSeconds: 10
-                timeoutSeconds: 5
-                failureThreshold: 3
             terminationGracePeriodSeconds: 180
             restartPolicy: Never
           EOF
             done
           done
 
-          # Wait for test completion with better logging
           echo "Waiting for all tests to complete..."
           for i in $(seq 1 45); do
             PENDING=$(kubectl get pods -n argocd -l test-type=iperf3-client -o jsonpath='{.items[?(@.status.phase!="Succeeded")].metadata.name}')
