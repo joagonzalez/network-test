@@ -2,14 +2,18 @@ apiVersion: argoproj.io/v1alpha1
 kind: Workflow
 metadata:
   name: iperf3-network-test
-  namespace: argocd # Changed to argocd namespace
+  namespace: argocd
 spec:
   entrypoint: network-test-suite
   templates:
     - name: network-test-suite
       steps:
+        - - name: create-server-service
+            template: iperf3-service
+        - - name: deploy-server
+            template: iperf3-server
         - - name: test-10mbps
-            template: iperf3-test
+            template: iperf3-client
             arguments:
               parameters:
                 - name: bandwidth
@@ -17,7 +21,7 @@ spec:
                 - name: test-name
                   value: "low-bandwidth"
         - - name: test-100mbps
-            template: iperf3-test
+            template: iperf3-client
             arguments:
               parameters:
                 - name: bandwidth
@@ -25,41 +29,93 @@ spec:
                 - name: test-name
                   value: "medium-bandwidth"
         - - name: test-1gbps
-            template: iperf3-test
+            template: iperf3-client
             arguments:
               parameters:
                 - name: bandwidth
                   value: "1G"
                 - name: test-name
                   value: "high-bandwidth"
+        - - name: cleanup
+            template: cleanup
 
-    - name: iperf3-test
+    - name: iperf3-service
+      resource:
+        action: create
+        manifest: |
+          apiVersion: v1
+          kind: Service
+          metadata:
+            name: iperf3-server
+            namespace: argocd
+          spec:
+            selector:
+              app: iperf3-server
+            ports:
+              - protocol: TCP
+                port: 5201
+                targetPort: 5201
+
+    - name: iperf3-server
+      resource:
+        action: create
+        manifest: |
+          apiVersion: v1
+          kind: Pod
+          metadata:
+            name: iperf3-server
+            namespace: argocd
+            labels:
+              app: iperf3-server
+          spec:
+            nodeSelector:
+              kubernetes.io/hostname: microk8s-01  # Replace with your first node name
+            containers:
+            - name: server
+              image: networkstatic/iperf3
+              command: ["iperf3", "-s"]
+              ports:
+              - containerPort: 5201
+            restartPolicy: Never
+
+    - name: iperf3-client
       inputs:
         parameters:
           - name: bandwidth
           - name: test-name
-      script:
-        image: networkstatic/iperf3
-        command: [bash]
-        source: |
-          # Start iperf3 server in background
-          iperf3 -s &
-          SERVER_PID=$!
+      resource:
+        action: create
+        manifest: |
+          apiVersion: v1
+          kind: Pod
+          metadata:
+            name: iperf3-client-{{inputs.parameters.test-name}}
+            namespace: argocd
+          spec:
+            nodeSelector:
+              kubernetes.io/hostname: microk8s-02  # Replace with your second node name
+            containers:
+            - name: client
+              image: networkstatic/iperf3
+              command:
+                - /bin/sh
+                - -c
+                - |
+                  RESULT=$(iperf3 -c iperf3-server.argocd.svc.cluster.local -b {{inputs.parameters.bandwidth}} -t 30 -J)
+                  BANDWIDTH=$(echo $RESULT | jq -r '.end.sum_received.bits_per_second')
+                  curl --data-binary @- http://prometheus-pushgateway.monitoring.svc.cluster.local:9091/metrics/job/iperf3_test/test_name/{{inputs.parameters.test-name}} <<EOF
+                  # TYPE iperf3_bandwidth_bits_per_second gauge
+                  iperf3_bandwidth_bits_per_second{test_name="{{inputs.parameters.test-name}}"} $BANDWIDTH
+                  EOF
+            restartPolicy: Never
 
-          # Wait for server to start
-          sleep 5
-
-          # Run client test and capture results
-          iperf3 -c localhost -b {{inputs.parameters.bandwidth}} -t 30 -J | tee /tmp/results.json
-
-          # Extract bandwidth and convert to bits/second
-          BANDWIDTH=$(cat /tmp/results.json | jq -r '.end.sum_received.bits_per_second')
-
-          # Push metrics to Prometheus Pushgateway
-          cat <<EOF | curl --data-binary @- http://prometheus-pushgateway.monitoring.svc.cluster.local:9091/metrics/job/iperf3_test/test_name/{{inputs.parameters.test-name}}
-          # TYPE iperf3_bandwidth_bits_per_second gauge
-          iperf3_bandwidth_bits_per_second{test_name="{{inputs.parameters.test-name}}"} $BANDWIDTH
-          EOF
-
-          # Kill server
-          kill $SERVER_PID
+    - name: cleanup
+      resource:
+        action: delete
+        manifest: |
+          apiVersion: v1
+          kind: Service
+          metadata:
+            name: iperf3-server
+            namespace: argocd
+        flags: ["--ignore-not-found"]
