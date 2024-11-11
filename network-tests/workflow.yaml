@@ -1,10 +1,11 @@
 apiVersion: argoproj.io/v1alpha1
 kind: Workflow
 metadata:
-  name: iperf3-network-test-2
+  name: iperf3-network-test
   namespace: argocd
 spec:
-  activeDeadlineSeconds: 1500 # total workflow timeout in seconds
+  # Overall workflow timeout
+  activeDeadlineSeconds: 3600 # 1 hour total workflow timeout
 
   entrypoint: network-test-suite
   arguments:
@@ -14,7 +15,7 @@ spec:
       - name: client-label
         value: role=red
       - name: test-duration
-        value: "120" # Duration in seconds for each iperf test
+        value: "30" # Duration in seconds for each iperf test
       - name: cleanup-wait
         value: "10" # Time to wait after cleanup
       - name: server-startup-wait
@@ -22,7 +23,6 @@ spec:
 
   templates:
     - name: network-test-suite
-      activeDeadlineSeconds: 3000 # 50 minutes timeout for the main template
       steps:
         - - name: cleanup-previous
             template: cleanup-previous
@@ -56,7 +56,6 @@ spec:
             template: cleanup-all
 
     - name: wait-for-servers
-      activeDeadlineSeconds: 120 # 2 minutes timeout
       script:
         image: bitnami/kubectl
         command: [bash]
@@ -64,9 +63,9 @@ spec:
           echo "Waiting {{workflow.parameters.server-startup-wait}} seconds for servers to be ready..."
           sleep {{workflow.parameters.server-startup-wait}}
           kubectl wait --for=condition=ready pod -l app=iperf3-server -n argocd --timeout=60s
+      activeDeadlineSeconds: 120 # 2 minutes timeout
 
     - name: cleanup-previous
-      activeDeadlineSeconds: 30 # 30 seconds timeout
       script:
         image: bitnami/kubectl
         command: [bash]
@@ -76,32 +75,9 @@ spec:
           kubectl delete svc -n argocd iperf3-server --ignore-not-found
           echo "Waiting {{workflow.parameters.cleanup-wait}} seconds for cleanup..."
           sleep {{workflow.parameters.cleanup-wait}}
-
-    - name: iperf3-client-step
-      activeDeadlineSeconds: 600 # 10 minutes timeout
-      inputs:
-        parameters:
-          - name: bandwidth
-          - name: test-name
-          - name: client-nodes
-          - name: test-duration
-      steps:
-        - - name: run-client
-            template: iperf3-client
-            arguments:
-              parameters:
-                - name: bandwidth
-                  value: "{{inputs.parameters.bandwidth}}"
-                - name: test-name
-                  value: "{{inputs.parameters.test-name}}"
-                - name: test-duration
-                  value: "{{inputs.parameters.test-duration}}"
-                - name: node
-                  value: "{{item}}"
-            withParam: "{{inputs.parameters.client-nodes}}"
+      activeDeadlineSeconds: 30 # 30 seconds timeout
 
     - name: iperf3-client
-      activeDeadlineSeconds: 300 # 5 minutes timeout
       inputs:
         parameters:
           - name: bandwidth
@@ -138,3 +114,6 @@ spec:
                   iperf3_bandwidth_bits_per_second{test_name="{{inputs.parameters.test-name}}",client_node="{{inputs.parameters.node}}"} $BANDWIDTH
                   EOF
             restartPolicy: Never
+      activeDeadlineSeconds: 300 # 5 minutes timeout
+
+    # Add activeDeadlineSeconds only to leaf templates (script, resource, container templates)
