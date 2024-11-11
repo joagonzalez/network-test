@@ -21,36 +21,47 @@ spec:
         - - name: create-server-service
             template: iperf3-service
         - - name: deploy-servers
-            template: iperf3-server
-            arguments:
-              parameters:
-                - name: node
-                  value: "{{item}}"
-            withParam: "{{steps.get-server-nodes.outputs.result}}"
+            template: iperf3-server-step # Changed to a new template that handles the iteration
         - - name: test-10mbps
-            template: iperf3-client
+            template: iperf3-client-step # Changed to a new template that handles the iteration
             arguments:
               parameters:
                 - name: bandwidth
                   value: "10M"
                 - name: test-name
                   value: "low-bandwidth"
+        - - name: cleanup
+            template: cleanup
+
+    # New template to handle server deployment iteration
+    - name: iperf3-server-step
+      steps:
+        - - name: deploy-server
+            template: iperf3-server
+            arguments:
+              parameters:
                 - name: node
                   value: "{{item}}"
-            withParam: "{{steps.get-client-nodes.outputs.result}}"
-        - - name: test-100mbps
+            withParam: "{{steps.get-server-nodes.outputs.result}}"
+
+    # New template to handle client test iteration
+    - name: iperf3-client-step
+      inputs:
+        parameters:
+          - name: bandwidth
+          - name: test-name
+      steps:
+        - - name: run-client
             template: iperf3-client
             arguments:
               parameters:
                 - name: bandwidth
-                  value: "100M"
+                  value: "{{inputs.parameters.bandwidth}}"
                 - name: test-name
-                  value: "medium-bandwidth"
+                  value: "{{inputs.parameters.test-name}}"
                 - name: node
                   value: "{{item}}"
             withParam: "{{steps.get-client-nodes.outputs.result}}"
-        - - name: cleanup
-            template: cleanup
 
     - name: get-server-nodes
       script:
