@@ -144,8 +144,6 @@ spec:
         command: [bash]
         source: |
           set -ex
-
-          # Generate test pairs
           CLIENTS=$(echo '{{inputs.parameters.client-nodes}}' | jq -r '.[]')
           SERVERS=$(echo '{{inputs.parameters.server-nodes}}' | jq -r '.[]')
 
@@ -171,51 +169,82 @@ spec:
                 - /bin/bash
                 - -c
                 - |
-                  echo "Starting iperf3 test..."
+                  trap 'echo "Trap caught, executing cleanup..."; exit 0' TERM INT
+
+                  set -x
                   SERVER_POD="iperf3-server-${SERVER}"
+                  SERVER_ADDR="\$SERVER_POD.argocd.svc.cluster.local"
 
-                  # Run test
+                  echo "Waiting for server to be ready..."
+                  for i in \$(seq 1 30); do
+                    if nc -z -w 1 \$SERVER_ADDR 5201; then
+                      echo "Server is ready"
+                      break
+                    fi
+                    echo "Waiting for server... attempt \$i"
+                    sleep 2
+                  done
+
                   echo "Running iperf3 test..."
-                  RESULT=\$(iperf3 -c \$SERVER_POD.argocd.svc.cluster.local -b {{inputs.parameters.bandwidth}} -t {{inputs.parameters.test-duration}} -J)
+                  RESULT=\$(timeout {{inputs.parameters.test-duration}} iperf3 -c \$SERVER_ADDR -b {{inputs.parameters.bandwidth}} -t {{inputs.parameters.test-duration}} -J || true)
 
-                  # Extract and verify bandwidth
+                  if [ -z "\$RESULT" ]; then
+                    echo "No result from iperf3"
+                    exit 1
+                  fi
+
+                  echo "Raw result: \$RESULT"
                   BANDWIDTH=\$(echo "\$RESULT" | jq -r '.end.sum_received.bits_per_second')
-                  echo "Measured bandwidth: \$BANDWIDTH"
 
                   if [ -z "\$BANDWIDTH" ] || [ "\$BANDWIDTH" = "null" ]; then
-                    echo "Error: Invalid bandwidth value"
+                    echo "Invalid bandwidth value"
                     exit 1
                   fi
 
-                  # Create metrics payload
-                  METRICS_PAYLOAD="# TYPE iperf3_bandwidth_bits_per_second gauge
+                  echo "Pushing metrics..."
+                  METRICS="# TYPE iperf3_bandwidth_bits_per_second gauge
                   iperf3_bandwidth_bits_per_second{test_name=\\\"{{inputs.parameters.test-name}}\\\",client_node=\\\"${CLIENT}\\\",server_node=\\\"${SERVER}\\\"} \$BANDWIDTH"
 
-                  # Push metrics with error checking
-                  echo "\$METRICS_PAYLOAD" | curl -v --data-binary @- http://pushgateway.monitoring.svc.cluster.local:9091/metrics/job/iperf3_test
+                  echo "\$METRICS" | curl --max-time 10 -v --data-binary @- http://pushgateway.monitoring.svc.cluster.local:9091/metrics/job/iperf3_test
 
-                  if [ \$? -eq 0 ]; then
-                    echo "Successfully pushed metrics to Prometheus"
-                  else
-                    echo "Failed to push metrics to Prometheus"
-                    exit 1
-                  fi
+                  echo "Test completed successfully"
               resources:
                 requests:
-                  memory: "64Mi"
+                  memory: "128Mi"
                   cpu: "250m"
                 limits:
-                  memory: "128Mi"
+                  memory: "256Mi"
                   cpu: "500m"
+              livenessProbe:
+                exec:
+                  command:
+                  - pgrep
+                  - iperf3
+                initialDelaySeconds: 5
+                periodSeconds: 10
+              readinessProbe:
+                exec:
+                  command:
+                  - pgrep
+                  - iperf3
+                initialDelaySeconds: 5
+                periodSeconds: 10
+            terminationGracePeriodSeconds: 30
             restartPolicy: Never
           EOF
-            done
-          done
+                done
+              done
 
-          # Wait for all tests to complete
-          echo "Waiting for all tests to complete..."
-          kubectl wait --for=condition=complete pod -l test-type=iperf3-client -n argocd --timeout=300s || true
-      activeDeadlineSeconds: 600
+              echo "Waiting for tests to complete..."
+              for i in $(seq 1 30); do
+                PENDING=$(kubectl get pods -n argocd -l test-type=iperf3-client -o jsonpath='{.items[?(@.status.phase!="Succeeded")].metadata.name}')
+                if [ -z "$PENDING" ]; then
+                  echo "All tests completed"
+                  break
+                fi
+                echo "Waiting for tests to complete... attempt $i"
+                sleep 10
+              done
 
     - name: cleanup-all
       script:
