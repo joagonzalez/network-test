@@ -51,20 +51,20 @@ spec:
                   value: "{{steps.get-server-nodes.outputs.result}}"
                 - name: test-duration
                   value: "{{workflow.parameters.test-duration}}"
-        # - - name: test-20mbps
-        #     template: iperf3-client-step
-        #     arguments:
-        #       parameters:
-        #         - name: bandwidth
-        #           value: "20M"
-        #         - name: test-name
-        #           value: "medium-bandwidth"
-        #         - name: client-nodes
-        #           value: "{{steps.get-client-nodes.outputs.result}}"
-        #         - name: server-nodes
-        #           value: "{{steps.get-server-nodes.outputs.result}}"
-        #         - name: test-duration
-        #           value: "{{workflow.parameters.test-duration}}"
+        - - name: test-20mbps
+            template: iperf3-client-step
+            arguments:
+              parameters:
+                - name: bandwidth
+                  value: "20M"
+                - name: test-name
+                  value: "medium-bandwidth"
+                - name: client-nodes
+                  value: "{{steps.get-client-nodes.outputs.result}}"
+                - name: server-nodes
+                  value: "{{steps.get-server-nodes.outputs.result}}"
+                - name: test-duration
+                  value: "{{workflow.parameters.test-duration}}"
         - - name: final-cleanup
             template: cleanup-all
 
@@ -108,9 +108,17 @@ spec:
       inputs:
         parameters:
           - name: node
-      resource:
-        action: create
-        manifest: |
+      script:
+        image: bitnami/kubectl
+        command: [bash]
+        source: |
+          set -ex
+
+          # First try to delete any existing service
+          kubectl delete service iperf3-server-{{inputs.parameters.node}} -n argocd --ignore-not-found
+
+          # Create the service
+          cat <<EOF | kubectl apply -f -
           apiVersion: v1
           kind: Service
           metadata:
@@ -127,6 +135,7 @@ spec:
             - protocol: TCP
               port: 5201
               targetPort: 5201
+          EOF
 
     - name: create-server-pod
       inputs:
