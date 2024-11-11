@@ -1,7 +1,7 @@
 apiVersion: argoproj.io/v1alpha1
 kind: Workflow
 metadata:
-  name: iperf3-network-test-12
+  name: iperf3-network-test-13
   namespace: argocd
   labels:
     workflow: iperf3-test
@@ -207,7 +207,7 @@ spec:
               TEST_NAME="iperf3-client-{{inputs.parameters.test-name}}-${CLIENT}-to-${SERVER}"
               echo "Creating test pod: $TEST_NAME"
 
-              kubectl apply -f - <<'EOF'
+              cat > /tmp/pod.yaml << 'TEMPEOF'
               apiVersion: v1
               kind: Pod
               metadata:
@@ -286,7 +286,15 @@ spec:
                       cpu: "1000m"
                 terminationGracePeriodSeconds: 180
                 restartPolicy: Never
-              EOF
+              TEMPEOF
+
+              # Replace variables in the template
+              eval "cat <<EOF
+              $(cat /tmp/pod.yaml)
+              EOF" > /tmp/final-pod.yaml
+
+              # Apply the pod
+              kubectl apply -f /tmp/final-pod.yaml
             done
           done
 
