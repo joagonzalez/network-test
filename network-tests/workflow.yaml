@@ -240,7 +240,7 @@ spec:
 
                   # Push metrics
                   echo "Pushing metrics to Prometheus..."
-                  curl -v --data-binary @- http://pushgateway.monitoring.svc.cluster.local:9091/metrics/job/iperf3_test/test_name/{{inputs.parameters.test-name}}/client_node/${CLIENT}/server_node/${SERVER} <<EOMETRIC
+                  curl -v --data-binary @- http://prometheus-pushgateway.monitoring.svc.cluster.local:9091/metrics/job/iperf3_test/test_name/{{inputs.parameters.test-name}}/client_node/${CLIENT}/server_node/${SERVER} <<EOMETRIC
                   # TYPE iperf3_bandwidth_bits_per_second gauge
                   iperf3_bandwidth_bits_per_second{test_name="{{inputs.parameters.test-name}}",client_node="${CLIENT}",server_node="${SERVER}"} \$BANDWIDTH
                   EOMETRIC
