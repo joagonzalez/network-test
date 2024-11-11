@@ -14,14 +14,18 @@ spec:
   templates:
     - name: network-test-suite
       steps:
-        - - name: get-server-nodes # Added this step first
+        - - name: get-server-nodes
             template: get-server-nodes
-        - - name: get-client-nodes # Added this step
+        - - name: get-client-nodes
             template: get-client-nodes
         - - name: create-server-service
             template: iperf3-service
         - - name: deploy-servers
             template: iperf3-server
+            arguments:
+              parameters:
+                - name: node
+                  value: "{{item}}"
             withParam: "{{steps.get-server-nodes.outputs.result}}"
         - - name: test-10mbps
             template: iperf3-client
@@ -31,6 +35,8 @@ spec:
                   value: "10M"
                 - name: test-name
                   value: "low-bandwidth"
+                - name: node
+                  value: "{{item}}"
             withParam: "{{steps.get-client-nodes.outputs.result}}"
         - - name: test-100mbps
             template: iperf3-client
@@ -40,6 +46,8 @@ spec:
                   value: "100M"
                 - name: test-name
                   value: "medium-bandwidth"
+                - name: node
+                  value: "{{item}}"
             withParam: "{{steps.get-client-nodes.outputs.result}}"
         - - name: cleanup
             template: cleanup
