@@ -198,7 +198,7 @@ spec:
               TEST_NAME="iperf3-client-{{inputs.parameters.test-name}}-${CLIENT}-to-${SERVER}"
               echo "Creating test pod: $TEST_NAME"
 
-              cat <<EOF | kubectl apply -f -
+              kubectl apply -f - <<'EOF'
               apiVersion: v1
               kind: Pod
               metadata:
@@ -222,50 +222,50 @@ spec:
                       SERVER_SERVICE="iperf3-server-${SERVER}.argocd.svc.cluster.local"
 
                       echo "Waiting for server service..."
-                      for i in \$(seq 1 30); do
-                        if nslookup \$SERVER_SERVICE >/dev/null 2>&1; then
+                      for i in $(seq 1 30); do
+                        if nslookup $SERVER_SERVICE >/dev/null 2>&1; then
                           echo "Server service found"
                           break
                         fi
-                        echo "Attempt \$i: Waiting for server service..."
+                        echo "Attempt $i: Waiting for server service..."
                         sleep 2
-                        if [ \$i -eq 30 ]; then
+                        if [ $i -eq 30 ]; then
                           echo "Server service not found after 30 attempts"
                           exit 1
                         fi
                       done
 
                       echo "Testing connection to server..."
-                      for i in \$(seq 1 30); do
-                        if nc -zv \$SERVER_SERVICE 5201; then
+                      for i in $(seq 1 30); do
+                        if nc -zv $SERVER_SERVICE 5201; then
                           echo "Server is reachable"
                           break
                         fi
-                        echo "Attempt \$i: Testing server connection..."
+                        echo "Attempt $i: Testing server connection..."
                         sleep 2
-                        if [ \$i -eq 30 ]; then
+                        if [ $i -eq 30 ]; then
                           echo "Server not reachable after 30 attempts"
                           exit 1
                         fi
                       done
 
                       echo "Running iperf3 test..."
-                      RESULT=\$(iperf3 -c \$SERVER_SERVICE -b {{inputs.parameters.bandwidth}} -t {{inputs.parameters.test-duration}} -J)
+                      RESULT=$(iperf3 -c $SERVER_SERVICE -b {{inputs.parameters.bandwidth}} -t {{inputs.parameters.test-duration}} -J)
 
                       echo "Processing results..."
-                      BANDWIDTH=\$(echo "\$RESULT" | jq -r '.end.sum_received.bits_per_second')
+                      BANDWIDTH=$(echo "$RESULT" | jq -r '.end.sum_received.bits_per_second')
 
-                      if [ -z "\$BANDWIDTH" ] || [ "\$BANDWIDTH" = "null" ]; then
+                      if [ -z "$BANDWIDTH" ] || [ "$BANDWIDTH" = "null" ]; then
                         echo "Invalid bandwidth value"
-                        echo "Raw result: \$RESULT"
+                        echo "Raw result: $RESULT"
                         exit 1
                       fi
 
                       echo "Pushing metrics..."
-                      cat <<METRICS | curl -v --max-time 30 --retry 3 --retry-delay 5 --data-binary @- http://prometheus-pushgateway.monitoring.svc.cluster.local:9091/metrics/job/iperf3_test
-                      # TYPE iperf3_bandwidth_bits_per_second gauge
-                      iperf3_bandwidth_bits_per_second{test_name="{{inputs.parameters.test-name}}",client_node="${CLIENT}",server_node="${SERVER}"} \$BANDWIDTH
-                      METRICS
+                      METRICS="# TYPE iperf3_bandwidth_bits_per_second gauge
+                      iperf3_bandwidth_bits_per_second{test_name=\"{{inputs.parameters.test-name}}\",client_node=\"${CLIENT}\",server_node=\"${SERVER}\"} $BANDWIDTH"
+
+                      echo "$METRICS" | curl -v --max-time 30 --retry 3 --retry-delay 5 --data-binary @- http://prometheus-pushgateway.monitoring.svc.cluster.local:9091/metrics/job/iperf3_test
 
                       echo "Test completed successfully"
                   resources:
@@ -282,7 +282,6 @@ spec:
           done
 
           echo "Waiting for all tests to complete..."
-
           for i in $(seq 1 45); do
             PENDING=$(kubectl get pods -n argocd -l test-type=iperf3-client -o jsonpath='{.items[?(@.status.phase!="Succeeded")].metadata.name}')
             if [ -z "$PENDING" ]; then
