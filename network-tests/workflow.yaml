@@ -146,13 +146,16 @@ spec:
               kubernetes.io/hostname: "{{inputs.parameters.node}}"
             containers:
             - name: client
-              image: networkstatic/iperf3
+              image: praqma/network-multitool  # This image includes iperf3, curl, jq and other networking tools
               command:
                 - /bin/sh
                 - -c
                 - |
+                  # Run the test
                   RESULT=$(iperf3 -c iperf3-server.argocd.svc.cluster.local -b {{inputs.parameters.bandwidth}} -t 30 -J)
                   BANDWIDTH=$(echo $RESULT | jq -r '.end.sum_received.bits_per_second')
+
+                  # Push metrics
                   curl --data-binary @- http://prometheus-pushgateway.monitoring.svc.cluster.local:9091/metrics/job/iperf3_test/test_name/{{inputs.parameters.test-name}}/client_node/{{inputs.parameters.node}} <<EOF
                   # TYPE iperf3_bandwidth_bits_per_second gauge
                   iperf3_bandwidth_bits_per_second{test_name="{{inputs.parameters.test-name}}",client_node="{{inputs.parameters.node}}"} $BANDWIDTH
