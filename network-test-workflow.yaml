@@ -1,0 +1,80 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Workflow
+metadata:
+  name: iperf3-network-test
+  namespace: network-tests
+spec:
+  entrypoint: network-test-suite
+  templates:
+    - name: network-test-suite
+      steps:
+        - - name: test-10mbps
+            template: iperf3-test
+            arguments:
+              parameters:
+                - name: bandwidth
+                  value: "10M"
+                - name: test-name
+                  value: "low-bandwidth"
+        - - name: test-100mbps
+            template: iperf3-test
+            arguments:
+              parameters:
+                - name: bandwidth
+                  value: "100M"
+                - name: test-name
+                  value: "medium-bandwidth"
+        - - name: test-1gbps
+            template: iperf3-test
+            arguments:
+              parameters:
+                - name: bandwidth
+                  value: "1G"
+                - name: test-name
+                  value: "high-bandwidth"
+
+    - name: iperf3-test
+      inputs:
+        parameters:
+          - name: bandwidth
+          - name: test-name
+      steps:
+        - - name: run-test
+            template: iperf3-network-test
+            arguments:
+              parameters:
+                - name: bandwidth
+                  value: "{{inputs.parameters.bandwidth}}"
+                - name: test-name
+                  value: "{{inputs.parameters.test-name}}"
+
+    - name: iperf3-network-test
+      inputs:
+        parameters:
+          - name: bandwidth
+          - name: test-name
+      script:
+        image: networkstatic/iperf3
+        command: [bash]
+        source: |
+          # Start iperf3 server in background
+          iperf3 -s &
+          SERVER_PID=$!
+
+          # Wait for server to start
+          sleep 5
+
+          # Run client test and capture results
+          iperf3 -c localhost -b {{inputs.parameters.bandwidth}} -t 30 -J | tee /tmp/results.json
+
+          # Extract bandwidth and convert to bits/second
+          BANDWIDTH=$(cat /tmp/results.json | jq -r '.end.sum_received.bits_per_second')
+
+          # Push metrics to Prometheus Pushgateway
+          cat <<EOF | curl --data-binary @- http://prometheus-pushgateway.monitoring.svc.cluster.local:9091/metrics/job/iperf3_test/test_name/{{inputs.parameters.test-name}}
+          # TYPE iperf3_bandwidth_bits_per_second gauge
+          iperf3_bandwidth_bits_per_second{test_name="{{inputs.parameters.test-name}}"} $BANDWIDTH
+          EOF
+
+          # Kill server
+          kill $SERVER_PID

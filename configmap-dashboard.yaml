@@ -1,0 +1,138 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: network-test-dashboard
+  namespace: monitoring
+  labels:
+    grafana_dashboard: "true"
+data:
+  network-test-dashboard.json: |-
+    {
+      "annotations": {
+        "list": []
+      },
+      "__inputs": [],
+      "__requires": [],
+      "editable": true,
+      "gnetId": null,
+      "graphTooltip": 0,
+      "hideControls": false,
+      "id": null,
+      "links": [],
+      "panels": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "fieldConfig": {
+            "defaults": {
+              "color": {
+                "mode": "palette-classic"
+              },
+              "custom": {
+                "axisCenteredZero": false,
+                "axisColorMode": "text",
+                "axisLabel": "Bandwidth (bits/second)",
+                "axisPlacement": "auto",
+                "barAlignment": 0,
+                "drawStyle": "line",
+                "fillOpacity": 20,
+                "gradientMode": "none",
+                "hideFrom": {
+                  "legend": false,
+                  "tooltip": false,
+                  "viz": false
+                },
+                "lineInterpolation": "linear",
+                "lineWidth": 2,
+                "pointSize": 5,
+                "scaleDistribution": {
+                  "type": "linear"
+                },
+                "showPoints": "auto",
+                "spanNulls": false,
+                "stacking": {
+                  "group": "A",
+                  "mode": "none"
+                },
+                "thresholdsStyle": {
+                  "mode": "off"
+                }
+              },
+              "mappings": [],
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "green",
+                    "value": null
+                  }
+                ]
+              },
+              "unit": "bps"
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 24,
+            "x": 0,
+            "y": 0
+          },
+          "id": 1,
+          "options": {
+            "legend": {
+              "calcs": [],
+              "displayMode": "list",
+              "placement": "bottom",
+              "showLegend": true
+            },
+            "tooltip": {
+              "mode": "single",
+              "sort": "none"
+            }
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "prometheus"
+              },
+              "expr": "iperf3_bandwidth_bits_per_second",
+              "legendFormat": "{{test_name}}",
+              "refId": "A"
+            }
+          ],
+          "title": "Network Bandwidth Tests",
+          "type": "timeseries"
+        }
+      ],
+      "refresh": "5s",
+      "schemaVersion": 38,
+      "style": "dark",
+      "tags": ["network", "iperf3"],
+      "templating": {
+        "list": []
+      },
+      "time": {
+        "from": "now-1h",
+        "to": "now"
+      },
+      "timepicker": {},
+      "timezone": "",
+      "title": "Network Performance Tests",
+      "uid": "network-tests",
+      "version": 1,
+      "url": "/d/network-tests/network-performance-tests",
+      "links": [
+        {
+          "icon": "external link",
+          "tags": [],
+          "targetBlank": true,
+          "title": "Open in Grafana",
+          "type": "link",
+          "url": "http://grafana.lb.k8s.lab/d/network-tests"
+        }
+      ]
+    }
