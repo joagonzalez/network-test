@@ -1,7 +1,7 @@
 apiVersion: argoproj.io/v1alpha1
 kind: Workflow
 metadata:
-  name: iperf3-network-test-8
+  name: iperf3-network-test-9
   namespace: argocd
   labels:
     workflow: iperf3-test
@@ -20,13 +20,11 @@ spec:
       - name: cleanup-wait
         value: "10"
       - name: server-startup-wait
-        value: "5"
+        value: "10"
 
   templates:
     - name: network-test-suite
       steps:
-        # - - name: cleanup-previous
-        #     template: cleanup-previous
         - - name: get-server-nodes
             template: get-server-nodes
         - - name: get-client-nodes
@@ -56,16 +54,6 @@ spec:
         - - name: final-cleanup
             template: cleanup-all
 
-    - name: cleanup-previous
-      script:
-        image: bitnami/kubectl
-        command: [bash]
-        source: |
-          set -ex
-          echo "Starting cleanup process..."
-          kubectl delete pods -n argocd $(kubectl get pods -n argocd | grep ^iperf3- | awk '{print $1}') --force --grace-period=0
-      activeDeadlineSeconds: 60
-
     - name: get-server-nodes
       script:
         image: bitnami/kubectl
@@ -87,25 +75,46 @@ spec:
         parameters:
           - name: server-nodes
       steps:
-        - - name: deploy-server
-            template: iperf3-server
+        - - name: create-service
+            template: create-server-service
+            arguments:
+              parameters:
+                - name: node
+                  value: "{{item}}"
+            withParam: "{{inputs.parameters.server-nodes}}"
+        - - name: create-pod
+            template: create-server-pod
             arguments:
               parameters:
                 - name: node
                   value: "{{item}}"
             withParam: "{{inputs.parameters.server-nodes}}"
 
-    - name: wait-for-servers
-      script:
-        image: bitnami/kubectl
-        command: [bash]
-        source: |
-          echo "Waiting {{workflow.parameters.server-startup-wait}} seconds for servers to be ready..."
-          sleep {{workflow.parameters.server-startup-wait}}
-          kubectl wait --for=condition=ready pod -l app=iperf3-server -n argocd --timeout=60s
-      activeDeadlineSeconds: 120
+    - name: create-server-service
+      inputs:
+        parameters:
+          - name: node
+      resource:
+        action: create
+        manifest: |
+          apiVersion: v1
+          kind: Service
+          metadata:
+            name: iperf3-server-{{inputs.parameters.node}}
+            namespace: argocd
+            labels:
+              app: iperf3-server
+              workflow: iperf3-test
+          spec:
+            selector:
+              app: iperf3-server
+              server-node: "{{inputs.parameters.node}}"
+            ports:
+            - protocol: TCP
+              port: 5201
+              targetPort: 5201
 
-    - name: iperf3-server
+    - name: create-server-pod
       inputs:
         parameters:
           - name: node
@@ -119,6 +128,7 @@ spec:
             namespace: argocd
             labels:
               app: iperf3-server
+              server-node: "{{inputs.parameters.node}}"
               workflow: iperf3-test
           spec:
             nodeSelector:
@@ -129,7 +139,24 @@ spec:
               command: ["iperf3", "-s"]
               ports:
               - containerPort: 5201
+              resources:
+                requests:
+                  memory: "256Mi"
+                  cpu: "500m"
+                limits:
+                  memory: "512Mi"
+                  cpu: "1000m"
             restartPolicy: Never
+
+    - name: wait-for-servers
+      script:
+        image: bitnami/kubectl
+        command: [bash]
+        source: |
+          echo "Waiting {{workflow.parameters.server-startup-wait}} seconds for servers to be ready..."
+          sleep {{workflow.parameters.server-startup-wait}}
+          kubectl wait --for=condition=ready pod -l app=iperf3-server -n argocd --timeout=60s
+      activeDeadlineSeconds: 120
 
     - name: iperf3-client-step
       inputs:
@@ -148,8 +175,6 @@ spec:
           echo "Debug: Starting test configuration..."
           echo "Client nodes: {{inputs.parameters.client-nodes}}"
           echo "Server nodes: {{inputs.parameters.server-nodes}}"
-          echo "Test duration: {{inputs.parameters.test-duration}}"
-          echo "Bandwidth: {{inputs.parameters.bandwidth}}"
 
           CLIENTS=$(echo '{{inputs.parameters.client-nodes}}' | jq -r '.[]')
           SERVERS=$(echo '{{inputs.parameters.server-nodes}}' | jq -r '.[]')
@@ -173,40 +198,56 @@ spec:
               kubernetes.io/hostname: "$CLIENT"
             containers:
             - name: client
-              image: nicolaka/netshoot    # This pod will use netshoot for iperf3
+              image: nicolaka/netshoot
               command:
                 - /bin/bash
                 - -c
                 - |
                   set -ex
 
-                  SERVER_POD="iperf3-server-${SERVER}"
+                  SERVER_SERVICE="iperf3-server-${SERVER}.argocd.svc.cluster.local"
 
-                  echo "Waiting for DNS resolution..."
+                  echo "Waiting for server service..."
                   for i in \$(seq 1 30); do
-                    if SERVER_IP=\$(getent hosts \${SERVER_POD}.argocd.svc.cluster.local | awk '{ print \$1 }'); then
-                      echo "Server IP resolved: \$SERVER_IP"
+                    if nslookup \$SERVER_SERVICE >/dev/null 2>&1; then
+                      echo "Server service found"
                       break
                     fi
-                    echo "Attempt \$i: Waiting for DNS resolution..."
+                    echo "Attempt \$i: Waiting for server service..."
                     sleep 2
+                    if [ \$i -eq 30 ]; then
+                      echo "Server service not found after 30 attempts"
+                      exit 1
+                    fi
                   done
 
-                  if [ -z "\$SERVER_IP" ]; then
-                    echo "Failed to resolve server IP"
-                    exit 1
-                  fi
+                  echo "Testing connection to server..."
+                  for i in \$(seq 1 30); do
+                    if nc -zv \$SERVER_SERVICE 5201; then
+                      echo "Server is reachable"
+                      break
+                    fi
+                    echo "Attempt \$i: Testing server connection..."
+                    sleep 2
+                    if [ \$i -eq 30 ]; then
+                      echo "Server not reachable after 30 attempts"
+                      exit 1
+                    fi
+                  done
 
-                  echo "Starting iperf3 test..."
-                  RESULT=\$(iperf3 -c \$SERVER_IP -b {{inputs.parameters.bandwidth}} -t {{inputs.parameters.test-duration}} -J)
+                  echo "Running iperf3 test..."
+                  RESULT=\$(iperf3 -c \$SERVER_SERVICE -b {{inputs.parameters.bandwidth}} -t {{inputs.parameters.test-duration}} -J)
 
+                  echo "Processing results..."
                   BANDWIDTH=\$(echo "\$RESULT" | jq -r '.end.sum_received.bits_per_second')
 
                   if [ -z "\$BANDWIDTH" ] || [ "\$BANDWIDTH" = "null" ]; then
                     echo "Invalid bandwidth value"
+                    echo "Raw result: \$RESULT"
                     exit 1
                   fi
 
+                  echo "Pushing metrics..."
                   METRICS="# TYPE iperf3_bandwidth_bits_per_second gauge
                   iperf3_bandwidth_bits_per_second{test_name=\\\"{{inputs.parameters.test-name}}\\\",client_node=\\\"${CLIENT}\\\",server_node=\\\"${SERVER}\\\"} \$BANDWIDTH"
 
@@ -251,7 +292,7 @@ spec:
         source: |
           set -ex
           echo "Deleting all test resources..."
-          kubectl delete pods -n argocd -l workflow=iperf3-test --force --grace-period=0 --wait=false || true
+          kubectl delete pods,svc -n argocd -l workflow=iperf3-test --force --grace-period=0 --wait=false || true
 
           echo "Removing finalizers from any stuck pods..."
           kubectl get pods -n argocd -l workflow=iperf3-test -o name | while read pod; do
