@@ -1,9 +1,12 @@
 apiVersion: argoproj.io/v1alpha1
 kind: Workflow
 metadata:
-  name: iperf3-network-test-2
+  name: iperf3-network-test
   namespace: argocd
 spec:
+  # Overall workflow timeout
+  activeDeadlineSeconds: 800 # total workflow timeout in seconds
+
   entrypoint: network-test-suite
   arguments:
     parameters:
@@ -11,21 +14,38 @@ spec:
         value: role=blue
       - name: client-label
         value: role=red
+      - name: test-duration
+        value: "120" # Duration in seconds for each iperf test
+      - name: cleanup-wait
+        value: "10" # Time to wait after cleanup
+      - name: server-startup-wait
+        value: "10" # Time to wait for server to be ready
+
   templates:
     - name: network-test-suite
       steps:
+        - - name: cleanup-previous
+            template: cleanup-previous
+            timeout: "30s" # Timeout for cleanup step
         - - name: get-server-nodes
             template: get-server-nodes
+            timeout: "30s"
         - - name: get-client-nodes
             template: get-client-nodes
+            timeout: "30s"
         - - name: create-server-service
             template: iperf3-service
+            timeout: "30s"
         - - name: deploy-servers
             template: iperf3-server-step
             arguments:
               parameters:
                 - name: server-nodes
                   value: "{{steps.get-server-nodes.outputs.result}}"
+            timeout: "5m" # 5 minutes timeout for server deployment
+        - - name: wait-for-servers
+            template: wait-for-servers
+            timeout: "2m"
         - - name: test-10mbps
             template: iperf3-client-step
             arguments:
@@ -36,96 +56,33 @@ spec:
                   value: "low-bandwidth"
                 - name: client-nodes
                   value: "{{steps.get-client-nodes.outputs.result}}"
-        - - name: cleanup
-            template: cleanup
+                - name: test-duration
+                  value: "{{workflow.parameters.test-duration}}"
+            timeout: "10m" # 10 minutes timeout for test execution
+        - - name: final-cleanup
+            template: cleanup-all
+            timeout: "30s"
 
-    - name: iperf3-server-step
-      inputs:
-        parameters:
-          - name: server-nodes
-      steps:
-        - - name: deploy-server
-            template: iperf3-server
-            arguments:
-              parameters:
-                - name: node
-                  value: "{{item}}"
-            withParam: "{{inputs.parameters.server-nodes}}"
-
-    - name: iperf3-client-step
-      inputs:
-        parameters:
-          - name: bandwidth
-          - name: test-name
-          - name: client-nodes
-      steps:
-        - - name: run-client
-            template: iperf3-client
-            arguments:
-              parameters:
-                - name: bandwidth
-                  value: "{{inputs.parameters.bandwidth}}"
-                - name: test-name
-                  value: "{{inputs.parameters.test-name}}"
-                - name: node
-                  value: "{{item}}"
-            withParam: "{{inputs.parameters.client-nodes}}"
-
-    - name: get-server-nodes
+    # New template to wait for servers to be ready
+    - name: wait-for-servers
       script:
         image: bitnami/kubectl
         command: [bash]
         source: |
-          kubectl get nodes -l {{workflow.parameters.server-label}} -o jsonpath='{.items[*].metadata.name}' | tr ' ' '\n' | jq -R . | jq -s .
+          echo "Waiting {{workflow.parameters.server-startup-wait}} seconds for servers to be ready..."
+          sleep {{workflow.parameters.server-startup-wait}}
+          kubectl wait --for=condition=ready pod -l app=iperf3-server -n argocd --timeout=60s
 
-    - name: get-client-nodes
+    - name: cleanup-previous
       script:
         image: bitnami/kubectl
         command: [bash]
         source: |
-          kubectl get nodes -l {{workflow.parameters.client-label}} -o jsonpath='{.items[*].metadata.name}' | tr ' ' '\n' | jq -R . | jq -s .
-
-    - name: iperf3-service
-      resource:
-        action: create
-        manifest: |
-          apiVersion: v1
-          kind: Service
-          metadata:
-            name: iperf3-server
-            namespace: argocd
-          spec:
-            selector:
-              app: iperf3-server
-            ports:
-              - protocol: TCP
-                port: 5201
-                targetPort: 5201
-
-    - name: iperf3-server
-      inputs:
-        parameters:
-          - name: node
-      resource:
-        action: create
-        manifest: |
-          apiVersion: v1
-          kind: Pod
-          metadata:
-            name: iperf3-server-{{inputs.parameters.node}}
-            namespace: argocd
-            labels:
-              app: iperf3-server
-          spec:
-            nodeSelector:
-              kubernetes.io/hostname: "{{inputs.parameters.node}}"
-            containers:
-            - name: server
-              image: networkstatic/iperf3
-              command: ["iperf3", "-s"]
-              ports:
-              - containerPort: 5201
-            restartPolicy: Never
+          kubectl delete pods -n argocd -l app=iperf3-server --ignore-not-found
+          kubectl delete pods -n argocd -l test-type=iperf3-client --ignore-not-found
+          kubectl delete svc -n argocd iperf3-server --ignore-not-found
+          echo "Waiting {{workflow.parameters.cleanup-wait}} seconds for cleanup..."
+          sleep {{workflow.parameters.cleanup-wait}}
 
     - name: iperf3-client
       inputs:
@@ -133,6 +90,7 @@ spec:
           - name: bandwidth
           - name: test-name
           - name: node
+          - name: test-duration
       resource:
         action: create
         manifest: |
@@ -141,34 +99,25 @@ spec:
           metadata:
             name: iperf3-client-{{inputs.parameters.test-name}}-{{inputs.parameters.node}}
             namespace: argocd
+            labels:
+              test-type: iperf3-client
           spec:
             nodeSelector:
               kubernetes.io/hostname: "{{inputs.parameters.node}}"
             containers:
             - name: client
-              image: praqma/network-multitool  # This image includes iperf3, curl, jq and other networking tools
+              image: praqma/network-multitool
               command:
                 - /bin/sh
                 - -c
                 - |
-                  # Run the test
-                  RESULT=$(iperf3 -c iperf3-server.argocd.svc.cluster.local -b {{inputs.parameters.bandwidth}} -t 30 -J)
+                  echo "Starting iperf3 test for {{inputs.parameters.test-duration}} seconds..."
+                  RESULT=$(iperf3 -c iperf3-server.argocd.svc.cluster.local -b {{inputs.parameters.bandwidth}} -t {{inputs.parameters.test-duration}} -J)
                   BANDWIDTH=$(echo $RESULT | jq -r '.end.sum_received.bits_per_second')
 
-                  # Push metrics
+                  echo "Pushing metrics to Prometheus..."
                   curl --data-binary @- http://prometheus-pushgateway.monitoring.svc.cluster.local:9091/metrics/job/iperf3_test/test_name/{{inputs.parameters.test-name}}/client_node/{{inputs.parameters.node}} <<EOF
                   # TYPE iperf3_bandwidth_bits_per_second gauge
                   iperf3_bandwidth_bits_per_second{test_name="{{inputs.parameters.test-name}}",client_node="{{inputs.parameters.node}}"} $BANDWIDTH
                   EOF
             restartPolicy: Never
-
-    - name: cleanup
-      resource:
-        action: delete
-        manifest: |
-          apiVersion: v1
-          kind: Service
-          metadata:
-            name: iperf3-server
-            namespace: argocd
-        flags: ["--ignore-not-found"]
