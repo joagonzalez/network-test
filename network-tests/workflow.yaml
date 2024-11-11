@@ -1,7 +1,7 @@
 apiVersion: argoproj.io/v1alpha1
 kind: Workflow
 metadata:
-  name: iperf3-network-test
+  name: iperf3-network-test-2
   namespace: argocd
 spec:
   entrypoint: network-test-suite
