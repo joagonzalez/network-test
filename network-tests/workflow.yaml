@@ -1,7 +1,7 @@
 apiVersion: argoproj.io/v1alpha1
 kind: Workflow
 metadata:
-  name: iperf3-network-test-33
+  name: iperf3-network-test-34
   namespace: argocd
   labels:
     workflow: iperf3-test
@@ -31,6 +31,13 @@ spec:
             template: get-server-nodes
         - - name: get-client-nodes
             template: get-client-nodes
+          - - name: create-services
+              template: create-server-service
+              arguments:
+                parameters:
+                  - name: node
+                    value: "{{item}}"
+              withParam: "{{steps.get-server-nodes.outputs.result}}"
         - - name: deploy-servers
             template: iperf3-server-step
             arguments:
@@ -119,6 +126,7 @@ spec:
             namespace: argocd
             labels:
               app: iperf3-server
+              server-node: "{{inputs.parameters.node}}"
               workflow: iperf3-test
           spec:
             nodeSelector:
@@ -126,10 +134,15 @@ spec:
             containers:
             - name: server
               image: nicolaka/netshoot
-              command: ["iperf3", "-s"]
+              command:
+                - "/bin/bash"
+                - "-c"
+                - |
+                  echo "Starting iperf3 server..."
+                  iperf3 -s -V
               ports:
-              - containerPort: 5201
-            restartPolicy: Never
+              - name: iperf3
+                containerPort: 5201
 
     - name: iperf3-client-step
       inputs:
@@ -241,3 +254,28 @@ spec:
           echo "Remaining pods: $REMAINING"
           exit 0
       activeDeadlineSeconds: 60
+
+    - name: create-server-service
+      inputs:
+        parameters:
+          - name: node
+      resource:
+        action: create
+        manifest: |
+          apiVersion: v1
+          kind: Service
+          metadata:
+            name: iperf3-server-{{inputs.parameters.node}}
+            namespace: argocd
+            labels:
+              app: iperf3-server
+              workflow: iperf3-test
+          spec:
+            selector:
+              app: iperf3-server
+              server-node: "{{inputs.parameters.node}}"
+            ports:
+            - name: iperf3
+              protocol: TCP
+              port: 5201
+              targetPort: 5201
