@@ -1,12 +1,18 @@
 apiVersion: argoproj.io/v1alpha1
 kind: Workflow
 metadata:
-  name: iperf3-network-test-49
+  name: iperf3-network-test-50
   namespace: argocd
   labels:
     workflow: iperf3-test
 spec:
   activeDeadlineSeconds: 3600 # 1 hour total workflow timeout
+  # Add TTL for the workflow
+  ttlStrategy:
+    secondsAfterCompletion: 30 # Delete workflow 30 seconds after completion
+  # Add pod garbage collection
+  podGC:
+    strategy: OnWorkflowCompletion
 
   entrypoint: network-test-suite
   arguments:
@@ -18,7 +24,7 @@ spec:
       - name: test-duration
         value: "240"
       - name: cleanup-wait
-        value: "10"
+        value: "3"
       - name: server-startup-wait
         value: "3"
 
