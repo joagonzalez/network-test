@@ -3,7 +3,7 @@
 
 # Delete pods with force
 echo "Force deleting iperf3 pods..."
-kubectl delete pods -n argocd 'iperf3-*' --force --grace-period=0 --wait=false
+kubectl delete pods,svc -n argocd -l "app in (iperf3-server, iperf3-client)" --force --grace-period=0 --wait=false
 
 # Remove finalizers from any stuck pods
 echo "Removing finalizers from stuck pods..."

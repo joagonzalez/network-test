@@ -18,9 +18,9 @@ The workflow will:
 3. Run a 1 Gbps bandwidth test for 60 seconds
 
 Each test will:
-- Deploy an iperf3 server on node1
-- Run an iperf3 client on node2
-- Collect metrics and store them in Prometheus
+- Deploys iperf3 servers on nodes labeled with `role=blue`
+  - Runs iperf3 clients on nodes labeled with `role=red`
+- Pushes results to Prometheus Pushgateway
 - Display results in Grafana
 
 The results will be visible in the Grafana dashboard, showing the bandwidth measurements for each test phase.
