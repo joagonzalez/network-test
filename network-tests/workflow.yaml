@@ -1,7 +1,7 @@
 apiVersion: argoproj.io/v1alpha1
 kind: Workflow
 metadata:
-  name: iperf3-network-test-34
+  name: iperf3-network-test-35
   namespace: argocd
   labels:
     workflow: iperf3-test
@@ -31,13 +31,13 @@ spec:
             template: get-server-nodes
         - - name: get-client-nodes
             template: get-client-nodes
-          - - name: create-services
-              template: create-server-service
-              arguments:
-                parameters:
-                  - name: node
-                    value: "{{item}}"
-              withParam: "{{steps.get-server-nodes.outputs.result}}"
+        - - name: create-services
+            template: create-server-service
+            arguments:
+              parameters:
+                - name: node
+                  value: "{{item}}"
+            withParam: "{{steps.get-server-nodes.outputs.result}}"
         - - name: deploy-servers
             template: iperf3-server-step
             arguments:
@@ -240,20 +240,7 @@ spec:
         source: |
           set -ex
           echo "Deleting all test resources..."
-          kubectl delete pods -n argocd -l workflow=iperf3-test --force --grace-period=0 --wait=false || true
-
-          echo "Removing finalizers from any stuck pods..."
-          kubectl get pods -n argocd -l workflow=iperf3-test -o name | while read pod; do
-            kubectl patch $pod -n argocd -p '{"metadata":{"finalizers":null}}' --type=merge || true
-            kubectl delete $pod -n argocd --force --grace-period=0 --wait=false || true
-          done
-
-          sleep {{workflow.parameters.cleanup-wait}}
-
-          REMAINING=$(kubectl get pods -n argocd -l workflow=iperf3-test -o name | wc -l)
-          echo "Remaining pods: $REMAINING"
-          exit 0
-      activeDeadlineSeconds: 60
+          kubectl delete pods,svc -n argocd -l workflow=iperf3-test --force --grace-period=0 --wait=false
 
     - name: create-server-service
       inputs:
