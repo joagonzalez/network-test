@@ -1,7 +1,7 @@
 apiVersion: argoproj.io/v1alpha1
 kind: Workflow
 metadata:
-  name: iperf3-network-test-31
+  name: iperf3-network-test-32
   namespace: argocd
   labels:
     workflow: iperf3-test
@@ -174,13 +174,16 @@ spec:
                   echo "Starting iperf3 test..."
                   SERVER_POD="iperf3-server-${SERVER}"
 
-                  # Run test
+                  # Run test with verbose output
                   echo "Running iperf3 test..."
-                  RESULT=\$(iperf3 -c \$SERVER_POD.argocd.svc.cluster.local -b {{inputs.parameters.bandwidth}} -t {{inputs.parameters.test-duration}} -J)
+                  RESULT=$(iperf3 -c ${SERVER_POD}.argocd.svc.cluster.local -b {{inputs.parameters.bandwidth}} -t {{inputs.parameters.test-duration}} -J --verbose)
+                  echo "Raw test result:"
+                  echo "$RESULT"
 
                   # Extract and verify bandwidth
-                  BANDWIDTH=\$(echo "\$RESULT" | jq -r '.end.sum_received.bits_per_second')
-                  echo "Measured bandwidth: \$BANDWIDTH"
+                  BANDWIDTH=$(echo "$RESULT" | jq -r '.end.sum_received.bits_per_second')
+                  echo "Measured bandwidth: $BANDWIDTH"
+
 
                   if [ -z "\$BANDWIDTH" ] || [ "\$BANDWIDTH" = "null" ]; then
                     echo "Error: Invalid bandwidth value"
