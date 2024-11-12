@@ -205,7 +205,7 @@ spec:
                   iperf3 -c \${SERVER_POD}.argocd.svc.cluster.local \\
                         -b {{inputs.parameters.bandwidth}} \\
                         -t {{inputs.parameters.test-duration}} \\
-                        -J --verbose > /tmp/iperf_result.json 2>/tmp/iperf_error.log
+                        -J > /tmp/iperf_result.json 2>/tmp/iperf_error.log
 
                   if [ ! -s /tmp/iperf_result.json ]; then
                     echo "Error: No test results"
