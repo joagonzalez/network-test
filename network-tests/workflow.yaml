@@ -1,7 +1,7 @@
 apiVersion: argoproj.io/v1alpha1
 kind: Workflow
 metadata:
-  name: iperf3-network-test-36
+  name: iperf3-network-test-37
   namespace: argocd
   labels:
     workflow: iperf3-test
@@ -16,7 +16,7 @@ spec:
       - name: client-label
         value: role=red
       - name: test-duration
-        value: "150"
+        value: "60"
       - name: cleanup-wait
         value: "10"
       - name: server-startup-wait
@@ -188,8 +188,9 @@ spec:
                   SERVER_POD="iperf3-server-${SERVER}"
 
                   # Run test with verbose output
-                  echo "Running iperf3 test..."
-                  RESULT=$(iperf3 -c ${SERVER_POD}.argocd.svc.cluster.local -b {{inputs.parameters.bandwidth}} -t {{inputs.parameters.test-duration}} -J --verbose)
+                  echo "Running iperf3 test with command: iperf3 -c ${SERVER_POD}.argocd.svc.cluster.local -b {{inputs.parameters.bandwidth}} -t {{inputs.parameters.test-duration}} -J --verbose"
+                  timeout 300 iperf3 -c ${SERVER_POD}.argocd.svc.cluster.local -b {{inputs.parameters.bandwidth}} -t {{inputs.parameters.test-duration}} -J --verbose > /tmp/iperf_result.json 2>/tmp/iperf_error.log || true
+                  RESULT=$(cat /tmp/iperf_result.json)
                   echo "Raw test result:"
                   echo "$RESULT"
 
