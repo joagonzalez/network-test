@@ -1,7 +1,7 @@
 apiVersion: argoproj.io/v1alpha1
 kind: Workflow
 metadata:
-  name: iperf3-network-test-39
+  name: iperf3-network-test-38
   namespace: argocd
   labels:
     workflow: iperf3-test
@@ -186,16 +186,16 @@ spec:
                 - |
                   set -x
                   SERVER_POD="iperf3-server-${SERVER}"
-                  echo "Server pod name: ${SERVER_POD}"
+                  echo "Server pod name: \${SERVER_POD}"
 
                   # Wait for DNS resolution
-                  until nslookup ${SERVER_POD}.argocd.svc.cluster.local; do
+                  until nslookup \${SERVER_POD}.argocd.svc.cluster.local; do
                     echo "Waiting for server DNS..."
                     sleep 2
                   done
 
                   # Test connectivity
-                  until nc -zv ${SERVER_POD}.argocd.svc.cluster.local 5201; do
+                  until nc -zv \${SERVER_POD}.argocd.svc.cluster.local 5201; do
                     echo "Waiting for server port..."
                     sleep 2
                   done
