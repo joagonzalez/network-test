@@ -20,7 +20,7 @@ spec:
       - name: cleanup-wait
         value: "10"
       - name: server-startup-wait
-        value: "10"
+        value: "3"
 
   templates:
     - name: network-test-suite
