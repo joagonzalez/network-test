@@ -1,7 +1,7 @@
 apiVersion: argoproj.io/v1alpha1
 kind: Workflow
 metadata:
-  name: iperf3-network-test-32
+  name: iperf3-network-test-33
   namespace: argocd
   labels:
     workflow: iperf3-test
