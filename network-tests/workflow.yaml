@@ -1,7 +1,7 @@
 apiVersion: argoproj.io/v1alpha1
 kind: Workflow
 metadata:
-  name: iperf3-network-test-38
+  name: iperf3-network-test-39
   namespace: argocd
   labels:
     workflow: iperf3-test
@@ -186,50 +186,54 @@ spec:
                 - |
                   set -x
                   SERVER_POD="iperf3-server-${SERVER}"
-                  echo "Server pod name: \${SERVER_POD}"
+                  echo "Server pod name: ${SERVER_POD}"
 
                   # Wait for DNS resolution
-                  until nslookup \${SERVER_POD}.argocd.svc.cluster.local; do
+                  until nslookup ${SERVER_POD}.argocd.svc.cluster.local; do
                     echo "Waiting for server DNS..."
                     sleep 2
                   done
 
                   # Test connectivity
-                  until nc -zv \${SERVER_POD}.argocd.svc.cluster.local 5201; do
+                  until nc -zv ${SERVER_POD}.argocd.svc.cluster.local 5201; do
                     echo "Waiting for server port..."
                     sleep 2
                   done
 
-                  # Run test
+                  # Run test and capture complete output
                   echo "Running iperf3 test..."
-                  iperf3 -c \${SERVER_POD}.argocd.svc.cluster.local \\
-                        -b {{inputs.parameters.bandwidth}} \\
-                        -t {{inputs.parameters.test-duration}} \\
-                        -J --verbose > /tmp/iperf_result.json 2>/tmp/iperf_error.log
+                  RESULT=$(iperf3 -c ${SERVER_POD}.argocd.svc.cluster.local \
+                                  -b {{inputs.parameters.bandwidth}} \
+                                  -t {{inputs.parameters.test-duration}} \
+                                  -J --verbose 2>/tmp/iperf_error.log)
 
-                  if [ ! -s /tmp/iperf_result.json ]; then
-                    echo "Error: No test results"
+                  echo "Raw test result: $RESULT"
+
+                  # Validate JSON before parsing
+                  if ! echo "$RESULT" | jq . >/dev/null 2>&1; then
+                    echo "Error: Invalid JSON output"
+                    echo "Raw output: $RESULT"
                     cat /tmp/iperf_error.log
                     exit 1
                   fi
 
-                  RESULT=\$(cat /tmp/iperf_result.json)
-                  echo "Raw test result: \$RESULT"
+                  # Extract bandwidth using more specific jq path
+                  BANDWIDTH=$(echo "$RESULT" | jq -r '.end.sum_received.bits_per_second // empty')
+                  echo "Measured bandwidth: $BANDWIDTH"
 
-                  BANDWIDTH=\$(echo "\$RESULT" | jq -r '.end.sum_received.bits_per_second')
-                  echo "Measured bandwidth: \$BANDWIDTH"
-
-                  if [ -z "\$BANDWIDTH" ] || [ "\$BANDWIDTH" = "null" ]; then
-                    echo "Error: Invalid bandwidth value"
+                  if [ -z "$BANDWIDTH" ]; then
+                    echo "Error: Could not extract bandwidth value"
+                    echo "Full JSON:"
+                    echo "$RESULT" | jq .
                     cat /tmp/iperf_error.log
                     exit 1
                   fi
 
                   # Push metrics
                   METRICS="# TYPE iperf3_bandwidth_bits_per_second gauge
-                  iperf3_bandwidth_bits_per_second{test_name=\"{{inputs.parameters.test-name}}\",client_node=\"${CLIENT}\",server_node=\"${SERVER}\"} \$BANDWIDTH"
+                  iperf3_bandwidth_bits_per_second{test_name=\"{{inputs.parameters.test-name}}\",client_node=\"${CLIENT}\",server_node=\"${SERVER}\"} $BANDWIDTH"
 
-                  echo "\$METRICS" | curl --data-binary @- http://pushgateway.monitoring.svc.cluster.local:9091/metrics/job/iperf3_test
+                  echo "$METRICS" | curl --data-binary @- http://prometheus-pushgateway.monitoring.svc.cluster.local:9091/metrics/job/iperf3_test
               resources:
                 requests:
                   memory: "64Mi"
