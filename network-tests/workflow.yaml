@@ -1,7 +1,7 @@
 apiVersion: argoproj.io/v1alpha1
 kind: Workflow
 metadata:
-  name: iperf3-network-test-43
+  name: iperf3-network-test-44
   namespace: argocd
   labels:
     workflow: iperf3-test
@@ -202,7 +202,7 @@ spec:
 
                   # Run test
                   echo "Running iperf3 test..."
-                  iperf3 -c ${SERVER_POD}.argocd.svc.cluster.local \
+                  iperf3 -c \${SERVER_POD}.argocd.svc.cluster.local \
                         -b {{inputs.parameters.bandwidth}} \
                         -t {{inputs.parameters.test-duration}} \
                         -J 2>/tmp/iperf_error.log | grep "^{" > /tmp/iperf_result.json
