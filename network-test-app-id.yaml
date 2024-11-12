@@ -1,18 +1,23 @@
 apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:
-  name: network-test-id
+  name: network-tests
   namespace: argocd
 spec:
   project: default
   source:
     repoURL: https://github.com/joagonzalez/network-test.git
-    path: network-tests-id
+    path: network-tests-id/templates # Point to templates directory
     targetRevision: HEAD
   destination:
     server: https://kubernetes.default.svc
-    namespace: argocd # Changed to argocd namespace
+    namespace: argocd
   syncPolicy:
     automated:
       prune: true
       selfHeal: true
+  ignoreDifferences:
+    - group: argoproj.io
+      kind: WorkflowTemplate
+      jsonPointers:
+        - /status
