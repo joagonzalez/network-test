@@ -1,7 +1,7 @@
 apiVersion: argoproj.io/v1alpha1
 kind: Workflow
 metadata:
-  name: iperf3-network-test-47
+  name: iperf3-network-test-48
   namespace: argocd
   labels:
     workflow: iperf3-test
@@ -229,7 +229,7 @@ spec:
                   METRICS="# TYPE iperf3_bandwidth_bits_per_second gauge
                   iperf3_bandwidth_bits_per_second{test_name=\"{{inputs.parameters.test-name}}\",client_node=\"${CLIENT}\",server_node=\"${SERVER}\"} \$BANDWIDTH"
 
-                  echo "\$METRICS" | curl --data-binary @- http://pushgateway.monitoring.svc.cluster.local:9091/metrics/job/iperf3_test
+                  echo "\$METRICS" | curl --data-binary @- http://prometheus-pushgateway.monitoring.svc.cluster.local:9091/metrics/job/iperf3_test
               resources:
                 requests:
                   memory: "64Mi"
