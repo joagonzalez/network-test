@@ -1,7 +1,7 @@
 apiVersion: argoproj.io/v1alpha1
 kind: Workflow
 metadata:
-  name: iperf3-network-test-44
+  name: iperf3-network-test-45
   namespace: argocd
   labels:
     workflow: iperf3-test
@@ -215,7 +215,7 @@ spec:
                   fi
 
                   # Parse only the JSON portion
-                  RESULT=$(cat /tmp/iperf_result.json | grep "^{")
+                  RESULT=\$(cat /tmp/iperf_result.json | grep "^{")
                   echo "Raw test result: $RESULT"
 
                   # Verify JSON structure
