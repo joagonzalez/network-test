@@ -1,0 +1,141 @@
+@startuml Network Test Workflow
+
+' Styling
+skinparam componentStyle rectangle
+
+' Define actors and systems
+rectangle "ArgoCD" as argo
+rectangle "Kubernetes Cluster" as k8s {
+    rectangle "Server Pods" as server_pods {
+        component "iperf3-server-pod" as server1 #LightGreen
+        note right of server1
+            Labels:
+            * app: iperf3-server
+            * server-node: <node-name>
+            * workflow: iperf3-test
+
+            NodeSelector:
+            * kubernetes.io/hostname: <node-name>
+
+            Container:
+            * Image: nicolaka/netshoot
+            * Command: iperf3 -s
+            * Port: 5201
+        end note
+    }
+
+    rectangle "Client Pods" as client_pods {
+        component "iperf3-client-pod" as client1 #LightBlue
+        note right of client1
+            Labels:
+            * test-type: iperf3-client
+            * workflow: iperf3-test
+
+            NodeSelector:
+            * kubernetes.io/hostname: <node-name>
+
+            Container:
+            * Image: nicolaka/netshoot
+            * Resources:
+              - CPU: 250m/500m
+              - Memory: 64Mi/128Mi
+            * Command: iperf3 -c <server> -b <bandwidth> -t <duration>
+        end note
+    }
+
+    rectangle "Services" as services {
+        component "iperf3-server-svc" as svc1 #Yellow
+        note right of svc1
+            Labels:
+            * app: iperf3-server
+            * workflow: iperf3-test
+
+            Selector:
+            * app: iperf3-server
+            * server-node: <node-name>
+
+            Port: 5201
+            Protocol: TCP
+        end note
+    }
+}
+
+database "Prometheus\nPushgateway" as prom
+rectangle "Grafana\nDashboard" as grafana
+
+' Parameters
+note left of argo
+  Workflow Parameters:
+  * test-duration: 240s
+  * server-startup-wait: 3s
+  * cleanup-wait: 3s
+  * server-label: role=blue
+  * client-label: role=red
+end note
+
+' Main workflow components
+rectangle "Network Test Workflow" {
+    component "Get Nodes" as nodes
+    note right of nodes
+        Node Selection:
+        * Server nodes: role=blue
+        * Client nodes: role=red
+    end note
+
+    component "Server Setup" as server
+    note right of server
+        1. Create service per server node
+        2. Deploy iperf3 server pods
+        3. Wait for readiness
+    end note
+
+    component "Client Tests" as client
+    note right of client
+        Tests Sequence:
+        1. low-bandwidth (10Mbps)
+        2. medium-bandwidth (50Mbps)
+        3. high-bandwidth (100Mbps)
+
+        For each test:
+        * Deploy client pods
+        * Wait for DNS resolution
+        * Run iperf3 test
+        * Push metrics
+    end note
+
+    component "Cleanup" as cleanup
+    note right of cleanup
+        Cleanup Tasks:
+        1. Delete all pods/services with:
+           workflow=iperf3-test
+        2. Remove finalizers
+        3. Verify cleanup
+    end note
+}
+
+' Relationships
+argo --> nodes
+nodes --> k8s: "Get labeled nodes"
+server --> server_pods: "Create pods"
+server --> services: "Create services"
+client --> client_pods: "Run tests"
+client_pods --> svc1: "Connect to server"
+client_pods --> prom: "Push metrics"
+prom --> grafana: "Query results"
+cleanup --> k8s: "Clean resources"
+
+note right of prom
+  Metrics Format:
+  iperf3_bandwidth_bits_per_second{
+    test_name="<test>",
+    client_node="<node>",
+    server_node="<node>"
+  } <value>
+
+  Test Names:
+  * low-bandwidth
+  * medium-bandwidth
+  * high-bandwidth
+end note
+
+@enduml

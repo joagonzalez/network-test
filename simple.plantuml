@@ -1,0 +1,64 @@
+@startuml Network Test Workflow
+
+' Styling
+skinparam componentStyle rectangle
+
+' Define actors and systems
+rectangle "ArgoCD" as argo
+rectangle "Kubernetes" as k8s
+database "Prometheus\nPushgateway" as prom
+rectangle "Grafana\nDashboard" as grafana
+
+' Parameters
+note left of argo
+  Workflow Parameters:
+  * test-duration: 240s
+  * server-startup-wait: 3s
+  * cleanup-wait: 3s
+  * server-label: role=blue
+  * client-label: role=red
+end note
+
+' Main workflow components
+rectangle "Network Test Workflow" {
+    component "Get Nodes" as nodes
+    component "Server Setup" as server
+    component "Client Tests" as client
+    component "Cleanup" as cleanup
+}
+
+' Relationships
+argo --> nodes
+nodes --> k8s: "Get labeled nodes"
+server --> k8s: "Deploy servers & services"
+client --> k8s: "Run tests"
+client --> prom: "Push metrics"
+prom --> grafana: "Query results"
+cleanup --> k8s: "Clean resources"
+
+' Resource details
+note right of k8s
+  Server Pod:
+  * Image: nicolaka/netshoot
+  * Command: iperf3 -s
+  * Port: 5201
+end note
+
+note right of client
+  Bandwidth Tests:
+  * low-bandwidth (10Mbps)
+  * medium-bandwidth (50Mbps)
+  * high-bandwidth (100Mbps)
+  Duration: 240s per test
+end note
+
+note right of prom
+  Metrics Format:
+  iperf3_bandwidth_bits_per_second{
+    test_name="<test>",
+    client_node="<node>",
+    server_node="<node>"
+  }
+end note
+
+@enduml
