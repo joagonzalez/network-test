@@ -17,7 +17,6 @@ spec:
   arguments:
     parameters:
       - name: test-id
-        value: "{{workflow.generateName}}" # This will auto-generate a unique ID
       - name: server-label
         value: role=blue
       - name: client-label
