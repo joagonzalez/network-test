@@ -1,7 +1,7 @@
 apiVersion: argoproj.io/v1alpha1
 kind: Workflow
 metadata:
-  name: iperf3-network-test-40
+  name: iperf3-network-test-38
   namespace: argocd
   labels:
     workflow: iperf3-test
@@ -200,40 +200,36 @@ spec:
                     sleep 2
                   done
 
-                  # Run test and capture complete output
+                  # Run test
                   echo "Running iperf3 test..."
-                  RESULT=$(iperf3 -c ${SERVER_POD}.argocd.svc.cluster.local \
-                                  -b {{inputs.parameters.bandwidth}} \
-                                  -t {{inputs.parameters.test-duration}} \
-                                  -J --verbose 2>/tmp/iperf_error.log)
+                  iperf3 -c \${SERVER_POD}.argocd.svc.cluster.local \\
+                        -b {{inputs.parameters.bandwidth}} \\
+                        -t {{inputs.parameters.test-duration}} \\
+                        -J --verbose > /tmp/iperf_result.json 2>/tmp/iperf_error.log
 
-                  echo "Raw test result: $RESULT"
-
-                  # Validate JSON before parsing
-                  if ! echo "$RESULT" | jq . >/dev/null 2>&1; then
-                    echo "Error: Invalid JSON output"
-                    echo "Raw output: $RESULT"
+                  if [ ! -s /tmp/iperf_result.json ]; then
+                    echo "Error: No test results"
                     cat /tmp/iperf_error.log
                     exit 1
                   fi
 
-                  # Extract bandwidth using more specific jq path
-                  BANDWIDTH=$(echo "$RESULT" | jq -r '.end.sum_received.bits_per_second // empty')
-                  echo "Measured bandwidth: $BANDWIDTH"
+                  RESULT=\$(cat /tmp/iperf_result.json)
+                  echo "Raw test result: \$RESULT"
 
-                  if [ -z "$BANDWIDTH" ]; then
-                    echo "Error: Could not extract bandwidth value"
-                    echo "Full JSON:"
-                    echo "$RESULT" | jq .
+                  BANDWIDTH=\$(echo "\$RESULT" | jq -r '.end.sum_received.bits_per_second')
+                  echo "Measured bandwidth: \$BANDWIDTH"
+
+                  if [ -z "\$BANDWIDTH" ] || [ "\$BANDWIDTH" = "null" ]; then
+                    echo "Error: Invalid bandwidth value"
                     cat /tmp/iperf_error.log
                     exit 1
                   fi
 
                   # Push metrics
                   METRICS="# TYPE iperf3_bandwidth_bits_per_second gauge
-                  iperf3_bandwidth_bits_per_second{test_name=\"{{inputs.parameters.test-name}}\",client_node=\"${CLIENT}\",server_node=\"${SERVER}\"} $BANDWIDTH"
+                  iperf3_bandwidth_bits_per_second{test_name=\"{{inputs.parameters.test-name}}\",client_node=\"${CLIENT}\",server_node=\"${SERVER}\"} \$BANDWIDTH"
 
-                  echo "$METRICS" | curl --data-binary @- http://prometheus-pushgateway.monitoring.svc.cluster.local:9091/metrics/job/iperf3_test
+                  echo "\$METRICS" | curl --data-binary @- http://prometheus-pushgateway.monitoring.svc.cluster.local:9091/metrics/job/iperf3_test
               resources:
                 requests:
                   memory: "64Mi"
