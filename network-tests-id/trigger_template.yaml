@@ -1,0 +1,29 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Workflow
+metadata:
+  generateName: iperf3-test-
+  namespace: argocd
+spec:
+  workflowTemplateRef:
+    name: iperf3-network-test-template
+  arguments:
+    parameters:
+      - name: test-duration
+        value: "300"
+      - name: server-label
+        value: "role=blue"
+---
+apiVersion: argoproj.io/v1alpha1
+kind: Workflow
+metadata:
+  generateName: iperf3-test-
+  namespace: argocd
+spec:
+  workflowTemplateRef:
+    name: iperf3-network-test-template
+  arguments:
+    parameters:
+      - name: test-duration
+        value: "400"
+      - name: server-label
+        value: "role=green"

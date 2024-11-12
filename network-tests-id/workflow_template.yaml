@@ -1,0 +1,319 @@
+# workflow-template.yaml
+apiVersion: argoproj.io/v1alpha1
+kind: WorkflowTemplate
+metadata:
+  name: iperf3-network-test-template
+  namespace: argocd
+spec:
+  activeDeadlineSeconds: 3600 # 1 hour total workflow timeout
+  # Add TTL for the workflow
+  ttlStrategy:
+    secondsAfterCompletion: 30 # Delete workflow 30 seconds after completion
+  # Add pod garbage collection
+  podGC:
+    strategy: OnWorkflowCompletion
+
+  entrypoint: network-test-suite
+  arguments:
+    parameters:
+      - name: test-id
+        value: "{{workflow.generateName}}" # This will auto-generate a unique ID
+      - name: server-label
+        value: role=blue
+      - name: client-label
+        value: role=red
+      - name: test-duration
+        value: "240"
+      - name: cleanup-wait
+        value: "3"
+      - name: server-startup-wait
+        value: "3"
+
+  templates:
+    - name: network-test-suite
+      steps:
+        # - - name: cleanup-previous
+        #     template: cleanup-previous
+        - - name: get-server-nodes
+            template: get-server-nodes
+        - - name: get-client-nodes
+            template: get-client-nodes
+        - - name: create-services
+            template: create-server-service
+            arguments:
+              parameters:
+                - name: node
+                  value: "{{item}}"
+            withParam: "{{steps.get-server-nodes.outputs.result}}"
+        - - name: deploy-servers
+            template: iperf3-server-step
+            arguments:
+              parameters:
+                - name: server-nodes
+                  value: "{{steps.get-server-nodes.outputs.result}}"
+        - - name: wait-for-servers
+            template: wait-for-servers
+        - - name: test-10mbps
+            template: iperf3-client-step
+            arguments:
+              parameters:
+                - name: bandwidth
+                  value: "10M"
+                - name: test-name
+                  value: "low-bandwidth"
+                - name: client-nodes
+                  value: "{{steps.get-client-nodes.outputs.result}}"
+                - name: server-nodes
+                  value: "{{steps.get-server-nodes.outputs.result}}"
+                - name: test-duration
+                  value: "{{workflow.parameters.test-duration}}"
+        - - name: test-50mbps
+            template: iperf3-client-step
+            arguments:
+              parameters:
+                - name: bandwidth
+                  value: "50M"
+                - name: test-name
+                  value: "medium-bandwidth"
+                - name: client-nodes
+                  value: "{{steps.get-client-nodes.outputs.result}}"
+                - name: server-nodes
+                  value: "{{steps.get-server-nodes.outputs.result}}"
+                - name: test-duration
+                  value: "{{workflow.parameters.test-duration}}"
+        - - name: test-100mbps
+            template: iperf3-client-step
+            arguments:
+              parameters:
+                - name: bandwidth
+                  value: "100M"
+                - name: test-name
+                  value: "high-bandwidth"
+                - name: client-nodes
+                  value: "{{steps.get-client-nodes.outputs.result}}"
+                - name: server-nodes
+                  value: "{{steps.get-server-nodes.outputs.result}}"
+                - name: test-duration
+                  value: "{{workflow.parameters.test-duration}}"
+        - - name: final-cleanup
+            template: cleanup-all
+
+    - name: cleanup-previous
+      script:
+        image: bitnami/kubectl
+        command: [bash]
+        source: |
+          set -ex
+          echo "Starting cleanup process..."
+          kubectl delete pods -n argocd $(kubectl get pods -n argocd | grep ^iperf3- | awk '{print $1}') --force --grace-period=0
+      activeDeadlineSeconds: 60
+
+    - name: get-server-nodes
+      script:
+        image: bitnami/kubectl
+        command: [bash]
+        source: |
+          kubectl get nodes -l {{workflow.parameters.server-label}} -o jsonpath='{.items[*].metadata.name}' | tr ' ' '\n' | jq -R . | jq -s .
+      activeDeadlineSeconds: 30
+
+    - name: get-client-nodes
+      script:
+        image: bitnami/kubectl
+        command: [bash]
+        source: |
+          kubectl get nodes -l {{workflow.parameters.client-label}} -o jsonpath='{.items[*].metadata.name}' | tr ' ' '\n' | jq -R . | jq -s .
+      activeDeadlineSeconds: 30
+
+    - name: iperf3-server-step
+      inputs:
+        parameters:
+          - name: server-nodes
+      steps:
+        - - name: deploy-server
+            template: iperf3-server
+            arguments:
+              parameters:
+                - name: node
+                  value: "{{item}}"
+            withParam: "{{inputs.parameters.server-nodes}}"
+
+    - name: wait-for-servers
+      script:
+        image: bitnami/kubectl
+        command: [bash]
+        source: |
+          echo "Waiting {{workflow.parameters.server-startup-wait}} seconds for servers to be ready..."
+          sleep {{workflow.parameters.server-startup-wait}}
+          kubectl wait --for=condition=ready pod -l app=iperf3-server -n argocd --timeout=60s
+      activeDeadlineSeconds: 120
+
+    - name: iperf3-server
+      inputs:
+        parameters:
+          - name: node
+      resource:
+        action: create
+        manifest: |
+          apiVersion: v1
+          kind: Pod
+          metadata:
+            name: iperf3-server-{{inputs.parameters.node}}-{{workflow.parameters.test-id}}
+            namespace: argocd
+            labels:
+              app: iperf3-server
+              server-node: "{{inputs.parameters.node}}"
+              workflow: iperf3-test
+              test-id: "{{workflow.parameters.test-id}}"
+          spec:
+            nodeSelector:
+              kubernetes.io/hostname: "{{inputs.parameters.node}}"
+            containers:
+            - name: server
+              image: nicolaka/netshoot
+              command:
+                - "/bin/bash"
+                - "-c"
+                - |
+                  echo "Starting iperf3 server..."
+                  iperf3 -s -V
+              ports:
+              - name: iperf3
+                containerPort: 5201
+
+    - name: iperf3-client-step
+      inputs:
+        parameters:
+          - name: bandwidth
+          - name: test-name
+          - name: client-nodes
+          - name: server-nodes
+          - name: test-duration
+      script:
+        image: bitnami/kubectl
+        command: [bash]
+        source: |
+          set -ex
+
+          # Generate test pairs
+          CLIENTS=$(echo '{{inputs.parameters.client-nodes}}' | jq -r '.[]')
+          SERVERS=$(echo '{{inputs.parameters.server-nodes}}' | jq -r '.[]')
+
+          for CLIENT in $CLIENTS; do
+            for SERVER in $SERVERS; do
+              TEST_NAME="iperf3-client-{{inputs.parameters.test-name}}-${CLIENT}-to-${SERVER}"
+              cat <<EOF | kubectl apply -f -
+          apiVersion: v1
+          kind: Pod
+          metadata:
+            name: $TEST_NAME
+            namespace: argocd
+            labels:
+              test-type: iperf3-client
+              workflow: iperf3-test
+              test-id: "{{workflow.parameters.test-id}}"
+          spec:
+            nodeSelector:
+              kubernetes.io/hostname: "$CLIENT"
+            containers:
+            - name: client
+              image: nicolaka/netshoot
+              command:
+                - /bin/bash
+                - -c
+                - |
+                  set -x
+                  SERVER_POD="iperf3-server-${SERVER}"
+                  echo "Server pod name: \${SERVER_POD}"
+
+                  # Wait for DNS resolution
+                  until nslookup \${SERVER_POD}.argocd.svc.cluster.local; do
+                    echo "Waiting for server DNS..."
+                    sleep 2
+                  done
+
+                  # Test connectivity
+                  until nc -zv \${SERVER_POD}.argocd.svc.cluster.local 5201; do
+                    echo "Waiting for server port..."
+                    sleep 2
+                  done
+
+                  # Run test
+                  echo "Running iperf3 test..."
+                  iperf3 -c \${SERVER_POD}.argocd.svc.cluster.local \\
+                        -b {{inputs.parameters.bandwidth}} \\
+                        -t {{inputs.parameters.test-duration}} \\
+                        -J > /tmp/iperf_result.json 2>/tmp/iperf_error.log
+
+                  if [ ! -s /tmp/iperf_result.json ]; then
+                    echo "Error: No test results"
+                    cat /tmp/iperf_error.log
+                    exit 1
+                  fi
+
+                  RESULT=\$(cat /tmp/iperf_result.json)
+                  echo "Raw test result: \$RESULT"
+
+                  BANDWIDTH=\$(echo "\$RESULT" | jq -r '.end.sum_received.bits_per_second')
+                  echo "Measured bandwidth: \$BANDWIDTH"
+
+                  if [ -z "\$BANDWIDTH" ] || [ "\$BANDWIDTH" = "null" ]; then
+                    echo "Error: Invalid bandwidth value"
+                    cat /tmp/iperf_error.log
+                    exit 1
+                  fi
+
+                  # Push metrics
+                  METRICS="# TYPE iperf3_bandwidth_bits_per_second gauge
+                  iperf3_bandwidth_bits_per_second{test_name=\"{{inputs.parameters.test-name}}\",test_id=\"{{workflow.parameters.test-id}}\",client_node=\"${CLIENT}\",server_node=\"${SERVER}\"} \$BANDWIDTH"
+
+                  echo "\$METRICS" | curl --data-binary @- http://prometheus-pushgateway.monitoring.svc.cluster.local:9091/metrics/job/iperf3_test
+              resources:
+                requests:
+                  memory: "64Mi"
+                  cpu: "250m"
+                limits:
+                  memory: "128Mi"
+                  cpu: "500m"
+            restartPolicy: Never
+          EOF
+            done
+          done
+
+          # Wait for all tests to complete
+          echo "Waiting for all tests to complete..."
+          kubectl wait --for=condition=complete pod -l test-type=iperf3-client -n argocd --timeout=300s || true
+
+    - name: cleanup-all
+      script:
+        image: bitnami/kubectl
+        command: [bash]
+        source: |
+          set -ex
+          echo "Deleting all test resources..."
+          kubectl delete pods,svc -n argocd -l "workflow=iperf3-test,test-id={{workflow.parameters.test-id}}" --force --grace-period=0 --wait=false
+
+    - name: create-server-service
+      inputs:
+        parameters:
+          - name: node
+      resource:
+        action: create
+        manifest: |
+          apiVersion: v1
+          kind: Service
+          metadata:
+            name: iperf3-server-{{inputs.parameters.node}}-{{workflow.parameters.test-id}}
+            namespace: argocd
+            labels:
+              app: iperf3-server
+              workflow: iperf3-test
+              test-id: "{{workflow.parameters.test-id}}"
+          spec:
+            selector:
+              app: iperf3-server
+              server-node: "{{inputs.parameters.node}}"
+            ports:
+            - name: iperf3
+              protocol: TCP
+              port: 5201
+              targetPort: 5201
