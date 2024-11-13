@@ -7,7 +7,7 @@ spec:
   project: default
   source:
     repoURL: https://github.com/joagonzalez/network-test.git
-    path: network-tests-id/templates # Point to templates directory
+    path: network-tests-id # Point to templates directory
     targetRevision: HEAD
   destination:
     server: https://kubernetes.default.svc
