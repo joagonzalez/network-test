@@ -10,7 +10,7 @@ spec:
     parameters:
       - name: test-id
         valueFrom:
-          expression: workflow.name # This will use the actual workflow name
+          value: "{{workflow.name}}" # This will use the actual workflow name
       - name: test-duration
         value: "300"
       - name: server-label
