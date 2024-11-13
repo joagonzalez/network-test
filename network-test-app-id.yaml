@@ -7,17 +7,24 @@ spec:
   project: default
   source:
     repoURL: https://github.com/joagonzalez/network-test.git
-    path: network-tests-id # Point to templates directory
+    path: network-tests-id
     targetRevision: HEAD
   destination:
     server: https://kubernetes.default.svc
     namespace: argocd
   syncPolicy:
     automated:
-      prune: true
+      prune: false # Changed from true to false
       selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+      - Replace=false
+      - PrunePropagationPolicy=foreground
+      - PruneLast=true
   ignoreDifferences:
     - group: argoproj.io
-      kind: WorkflowTemplate
+      kind: Workflow
       jsonPointers:
+        - /metadata/name
+        - /metadata/generateName
         - /status
