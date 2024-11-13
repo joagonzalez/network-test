@@ -311,6 +311,7 @@ spec:
             selector:
               app: iperf3-server
               server-node: "{{inputs.parameters.node}}"
+              test-id: "{{workflow.parameters.test-id}}"  # Add this selector
             ports:
             - name: iperf3
               protocol: TCP
