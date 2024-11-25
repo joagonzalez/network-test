@@ -196,6 +196,13 @@ spec:
           - name: scripts-volume
             mountPath: /scripts
         source: |
+          # Print the script content and location for debugging
+          echo "Checking script location:"
+          ls -la /scripts/
+          
+          # Make sure script is executable
+          chmod +x /scripts/iperf3-client-step.sh
+          
           /scripts/iperf3-client-step.sh \
             '{{inputs.parameters.client-nodes}}' \
             '{{inputs.parameters.server-nodes}}' \
