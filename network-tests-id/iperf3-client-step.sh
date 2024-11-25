@@ -11,7 +11,7 @@ TEST_DURATION="$6"
 
 for CLIENT in $CLIENTS; do
   for SERVER in $SERVERS; do
-    POD_NAME="iperf3-client-${TEST_NAME}-${CLIENT}-to-${SERVER}"
+    POD_NAME="iperf3-client-${TEST_NAME}-${CLIENT}-to-${SERVER}-${TEST_ID}"
 
     # Delete existing pod if it exists
     kubectl delete pod $POD_NAME -n argocd --ignore-not-found
