@@ -1,0 +1,74 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: iperf3-client-script
+  namespace: argocd
+data:
+  run-test.sh: |
+    #!/bin/bash
+    set -x
+    SERVER_POD="iperf3-server-${SERVER}-${TEST_ID}"
+    echo "Server pod name: ${SERVER_POD}"
+
+    # Debug DNS and services
+    echo "Listing all services:"
+    kubectl get svc -n argocd
+
+    echo "Checking DNS resolution:"
+    nslookup ${SERVER_POD}.argocd.svc.cluster.local || true
+
+    # Wait for DNS resolution with timeout
+    TIMEOUT=30
+    COUNTER=0
+    while ! nslookup ${SERVER_POD}.argocd.svc.cluster.local; do
+      echo "Waiting for server DNS... $COUNTER/$TIMEOUT"
+      sleep 2
+      COUNTER=$((COUNTER+2))
+      if [ $COUNTER -ge $TIMEOUT ]; then
+        echo "Timeout waiting for DNS resolution"
+        exit 1
+      fi
+    done
+
+    # Wait for port with timeout
+    COUNTER=0
+    while ! nc -z ${SERVER_POD}.argocd.svc.cluster.local 5201; do
+      echo "Waiting for server port... $COUNTER/$TIMEOUT"
+      sleep 2
+      COUNTER=$((COUNTER+2))
+      if [ $COUNTER -ge $TIMEOUT ]; then
+        echo "Timeout waiting for port"
+        exit 1
+      fi
+    done
+
+    # Run test
+    echo "Running iperf3 test..."
+    iperf3 -c ${SERVER_POD}.argocd.svc.cluster.local \
+          -b ${BANDWIDTH} \
+          -t ${TEST_DURATION} \
+          -J > /tmp/iperf_result.json 2>/tmp/iperf_error.log
+
+    if [ ! -s /tmp/iperf_result.json ]; then
+      echo "Error: No test results"
+      cat /tmp/iperf_error.log
+      exit 1
+    fi
+
+    RESULT=$(cat /tmp/iperf_result.json)
+    echo "Raw test result: $RESULT"
+
+    BANDWIDTH=$(echo "$RESULT" | jq -r '.end.sum_received.bits_per_second')
+    echo "Measured bandwidth: $BANDWIDTH"
+
+    if [ -z "$BANDWIDTH" ] || [ "$BANDWIDTH" = "null" ]; then
+      echo "Error: Invalid bandwidth value"
+      cat /tmp/iperf_error.log
+      exit 1
+    fi
+
+    # Push metrics
+    METRICS="# TYPE iperf3_bandwidth_bits_per_second gauge
+    iperf3_bandwidth_bits_per_second{test_name=\"${TEST_NAME}\",test_id=\"${TEST_ID}\",client_node=\"${CLIENT}\",server_node=\"${SERVER}\"} $BANDWIDTH"
+
+    echo "$METRICS" | curl --data-binary @- http://prometheus-pushgateway.monitoring.svc.cluster.local:9091/metrics/job/iperf3_test
