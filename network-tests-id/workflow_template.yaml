@@ -210,59 +210,47 @@ spec:
               sleep 2
 
               cat <<EOF | kubectl create -f -
-              apiVersion: v1
-              kind: Pod
-              metadata:
-                name: $TEST_NAME
-                namespace: argocd
-                labels:
-                  test-type: iperf3-client
-                  workflow: iperf3-test
-                  test-id: "{{workflow.parameters.test-id}}"
-              spec:
-                nodeSelector:
-                  kubernetes.io/hostname: "$CLIENT"
-                volumes:
-                  - name: script-volume
-                    configMap:
-                      name: iperf3-client-script
-                      defaultMode: 0777
-                containers:
-                - name: client
-                  image: nicolaka/netshoot
-                  env:
-                    - name: SERVER
-                      value: "$SERVER"
-                    - name: CLIENT
-                      value: "$CLIENT"
-                    - name: TEST_NAME
-                      value: "{{inputs.parameters.test-name}}"
-                    - name: TEST_ID
-                      value: "{{workflow.parameters.test-id}}"
-                    - name: BANDWIDTH
-                      value: "{{inputs.parameters.bandwidth}}"
-                    - name: TEST_DURATION
-                      value: "{{inputs.parameters.test-duration}}"
-                  command:
-                    - /scripts/run-test.sh
-                  volumeMounts:
-                    - name: script-volume
-                      mountPath: /scripts
-                  resources:
-                    requests:
-                      memory: "64Mi"
-                      cpu: "250m"
-                    limits:
-                      memory: "128Mi"
-                      cpu: "500m"
-                restartPolicy: Never
-              EOF
+        apiVersion: v1
+        kind: Pod
+        metadata:
+          name: $TEST_NAME
+          namespace: argocd
+          labels:
+            test-type: iperf3-client
+            workflow: iperf3-test
+            test-id: "{{workflow.parameters.test-id}}"
+        spec:
+          nodeSelector:
+            kubernetes.io/hostname: "$CLIENT"
+          volumes:
+            - name: script-volume
+              configMap:
+                name: iperf3-client-script
+                defaultMode: 0777
+          containers:
+          - name: client
+            image: nicolaka/netshoot
+            env:
+              - name: SERVER
+                value: "$SERVER"
+              - name: CLIENT
+                value: "$CLIENT"
+              - name: TEST_NAME
+                value: "{{inputs.parameters.test-name}}"
+              - name: TEST_ID
+                value: "{{workflow.parameters.test-id}}"
+              - name: BANDWIDTH
+                value: "{{inputs.parameters.bandwidth}}"
+              - name: TEST_DURATION
+                value: "{{inputs.parameters.test-duration}}"
+            volumeMounts:
+              - name: script-volume
+                mountPath: /scripts
+            command:
+              - /scripts/run-test.sh
+        EOF
             done
           done
-
-          # Wait for all tests to complete
-          echo "Waiting for all tests to complete..."
-          kubectl wait --for=condition=complete pod -l test-type=iperf3-client,test-id={{workflow.parameters.test-id}} -n argocd --timeout=300s || true
 
     - name: cleanup-all
       script:
