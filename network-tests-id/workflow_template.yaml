@@ -192,65 +192,22 @@ spec:
       script:
         image: bitnami/kubectl
         command: [bash]
+        volumeMounts:
+          - name: scripts-volume
+            mountPath: /scripts
         source: |
-          set -ex
-
-          # Generate test pairs
-          CLIENTS=$(echo '{{inputs.parameters.client-nodes}}' | jq -r '.[]')
-          SERVERS=$(echo '{{inputs.parameters.server-nodes}}' | jq -r '.[]')
-
-          for CLIENT in $CLIENTS; do
-            for SERVER in $SERVERS; do
-              TEST_NAME="iperf3-client-{{inputs.parameters.test-name}}-${CLIENT}-to-${SERVER}"
-
-              # Delete existing pod if it exists
-              kubectl delete pod $TEST_NAME -n argocd --ignore-not-found
-
-              # Wait a moment for the deletion to complete
-              sleep 2
-
-              cat <<EOF | kubectl create -f -
-        apiVersion: v1
-        kind: Pod
-        metadata:
-          name: $TEST_NAME
-          namespace: argocd
-          labels:
-            test-type: iperf3-client
-            workflow: iperf3-test
-            test-id: "{{workflow.parameters.test-id}}"
-        spec:
-          nodeSelector:
-            kubernetes.io/hostname: "$CLIENT"
-          volumes:
-            - name: script-volume
-              configMap:
-                name: iperf3-client-script
-                defaultMode: 0777
-          containers:
-          - name: client
-            image: nicolaka/netshoot
-            env:
-              - name: SERVER
-                value: "$SERVER"
-              - name: CLIENT
-                value: "$CLIENT"
-              - name: TEST_NAME
-                value: "{{inputs.parameters.test-name}}"
-              - name: TEST_ID
-                value: "{{workflow.parameters.test-id}}"
-              - name: BANDWIDTH
-                value: "{{inputs.parameters.bandwidth}}"
-              - name: TEST_DURATION
-                value: "{{inputs.parameters.test-duration}}"
-            volumeMounts:
-              - name: script-volume
-                mountPath: /scripts
-            command:
-              - /scripts/run-test.sh
-        EOF
-            done
-          done
+          /scripts/iperf3-client-step.sh \
+            '{{inputs.parameters.client-nodes}}' \
+            '{{inputs.parameters.server-nodes}}' \
+            '{{inputs.parameters.test-name}}' \
+            '{{workflow.parameters.test-id}}' \
+            '{{inputs.parameters.bandwidth}}' \
+            '{{inputs.parameters.test-duration}}'
+      volumes:
+        - name: scripts-volume
+          configMap:
+            name: iperf3-workflow-scripts
+            defaultMode: 0755
 
     - name: cleanup-all
       script:
